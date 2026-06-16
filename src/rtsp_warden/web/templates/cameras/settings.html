@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Camera Settings: {{ camera_name }}{% endblock %}
+
+{% block content %}
+<article>
+  <h1>Camera Settings: {{ camera_name }}</h1>
+
+  <mark>
+    Camera configuration is loaded from <code>config.yaml</code>. To change
+    settings, edit the file and restart the server. The web UI does not
+    modify camera configuration.
+  </mark>
+
+  <h2>Connection</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Main Stream URL</strong></td><td><code>{{ settings.main_url_redacted }}</code></td></tr>
+      <tr><td><strong>Sub Stream URL</strong></td><td><code>{{ settings.sub_url_redacted }}</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Recording</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Enabled</strong></td><td>{{ 'Yes' if settings.record_enabled else 'No' }}</td></tr>
+      <tr><td><strong>Output Directory</strong></td><td><code>{{ settings.record_output_dir }}</code></td></tr>
+      <tr><td><strong>Container Format</strong></td><td>{{ settings.record_container }}</td></tr>
+      <tr><td><strong>Chunk Duration</strong></td><td>{{ settings.record_chunk_seconds }} seconds</td></tr>
+      <tr><td><strong>RTSP Transport</strong></td><td>{{ settings.record_transport }}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Retention</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Max Days</strong></td><td>{{ settings.retention_max_days or 'Unlimited' }}</td></tr>
+      <tr><td><strong>Max GB</strong></td><td>{{ settings.retention_max_gb or 'Unlimited' }}</td></tr>
+      <tr><td><strong>Keep Last N</strong></td><td>{{ settings.retention_keep_last_n }}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Proxy</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Enabled</strong></td><td>{{ 'Yes' if settings.proxy_enabled else 'No' }}</td></tr>
+      <tr><td><strong>Mode</strong></td><td>{{ settings.proxy_mode }}</td></tr>
+      <tr><td><strong>Stream</strong></td><td>{{ settings.proxy_stream }}</td></tr>
+      <tr><td><strong>Bind Host</strong></td><td><code>{{ settings.proxy_bind_host }}</code></td></tr>
+      <tr><td><strong>Port</strong></td><td>{{ settings.proxy_port }}</td></tr>
+      <tr><td><strong>FPS</strong></td><td>{{ settings.proxy_fps }}</td></tr>
+    </tbody>
+  </table>
+
+  <a href="/cameras/{{ camera_name }}" role="button" class="secondary">Back to Camera</a>
+</article>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Alerts</h1>
+  <p>{{ notifiers|length }} notifier(s) configured. Master switch: {{ "ON" if cfg.alerts.enabled else "OFF" }}.</p>
+</hgroup>
+
+{% for n in notifiers %}
+<article>
+  <header>
+    <strong>{{ n.name }}</strong>
+    <span class="notifier-type notifier-{{ n.type }}">{{ n.type }}</span>
+    {% if not n.enabled %}<span class="disabled">disabled</span>{% endif %}
+  </header>
+  <p>URL: <code>{{ n.url }}</code></p>
+  <p>Severities: {{ n.severities | join(', ') }} | Min interval: {{ n.min_interval_seconds }}s</p>
+  <footer>
+    <button hx-post="/alerts/{{ n.name|urlencode }}/test" hx-swap="outerHTML">Send test</button>
+    <a href="/alerts/{{ n.name|urlencode }}/edit">Edit</a>
+  </footer>
+</article>
+{% endfor %}
+
+<p><a href="/alerts/new">+ Add notifier</a></p>
+
+<article>
+  <header>Note</header>
+  <p>Notifiers can also be configured in <code>config.yaml</code> under the <code>alerts</code> key. Restart the server to apply config.yaml changes.</p>
+</article>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Add Notifier{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Add Notifier</h1>
+  <p>Create a new alert notifier destination.</p>
+</hgroup>
+
+<article>
+  <header>Note</header>
+  <p>To add notifiers, edit your <code>config.yaml</code> under the <code>alerts</code> key and restart the server. Example:</p>
+</article>
+
+<article>
+  <pre><code>alerts:
+  enabled: true
+  notifiers:
+    - name: "My Phone"
+      type: ntfy
+      url: "https://ntfy.sh"
+      topic: "my-warden-alerts"
+      enabled: true
+      severities: ["warn", "error"]
+    - name: "Slack"
+      type: webhook
+      url: "https://hooks.slack.com/services/..."
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      enabled: true
+      severities: ["error"]</code></pre>
+</article>
+
+<p><a href="/alerts">Back to Alerts</a></p>
+{% endblock %}

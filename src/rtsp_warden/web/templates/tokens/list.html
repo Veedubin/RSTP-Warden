@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}API Tokens{% endblock %}
+
+{% block content %}
+<article>
+  <h1>API Tokens</h1>
+
+  {% if new_token_raw %}
+  <ins data-color="success" role="alert">
+    Token created successfully. Copy it now -- it will not be shown again.
+  </ins>
+  {% set secret_value = new_token_raw %}
+  {% set secret_label = "API Token" %}
+  {% include "partials/password_reveal.html" %}
+  {% endif %}
+
+  {% if error %}
+  <ins data-color="danger" role="alert">{{ error }}</ins>
+  {% endif %}
+
+  <h2>Create New Token</h2>
+  <form method="POST" action="/api-tokens"
+        hx-post="/api-tokens"
+        hx-target="article"
+        hx-swap="innerHTML"
+        hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+
+    <div class="grid" style="grid-template-columns: 1fr 8rem auto;">
+      <label for="name" class="sr-only">Token name</label>
+      <input type="text" id="name" name="name" placeholder="Token name (e.g. 'ci-deploy')" required>
+
+      <label for="expires_in_days" class="sr-only">Expires in days</label>
+      <input type="number" id="expires_in_days" name="expires_in_days" value="365" min="1"
+             placeholder="Days">
+
+      <button type="submit">Create Token</button>
+    </div>
+  </form>
+
+  <h2>Your Tokens</h2>
+  {% if tokens %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Prefix</th>
+        <th>Created</th>
+        <th>Last Used</th>
+        <th>Expires</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr>
+        <td>{{ t.name }}</td>
+        <td><code>{{ t.prefix }}...</code></td>
+        <td>{{ t.created_at[:16] if t.created_at else '-' }}</td>
+        <td>{{ t.last_used_at[:16] if t.last_used_at else 'Never' }}</td>
+        <td>{{ t.expires_at[:16] if t.expires_at else 'Never' }}</td>
+        <td>
+          <form method="POST" action="/api-tokens/{{ t.id }}/revoke"
+                hx-post="/api-tokens/{{ t.id }}/revoke"
+                hx-confirm="Revoke token '{{ t.name }}'?"
+                hx-target="article"
+                hx-swap="innerHTML"
+                hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <button type="submit" class="outline small contrast">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>You have no API tokens yet.</p>
+  {% endif %}
+</article>
+{% endblock %}

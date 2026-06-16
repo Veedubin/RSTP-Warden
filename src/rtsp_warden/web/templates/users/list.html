@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Users{% endblock %}
+
+{% block content %}
+<article>
+  <div class="grid">
+    <h1>Users</h1>
+    <div>
+      <a href="/users/new" role="button" class="outline">New User</a>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Created</th>
+        <th>Last Login</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ u.role }}</td>
+        <td>{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '-' }}</td>
+        <td>{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else 'Never' }}</td>
+        <td>
+          <div class="grid" style="grid-template-columns: repeat(3, auto); gap: 0.25rem;">
+            <a href="/users/{{ u.id }}/reset-password" role="button" class="secondary outline small">Reset Password</a>
+            <form method="POST" action="/users/{{ u.id }}/toggle-admin"
+                  hx-post="/users/{{ u.id }}/toggle-admin"
+                  hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+              <button type="submit" class="secondary outline small"
+                      {% if u.id == current_user_id %}disabled title="Cannot change your own role"{% endif %}>
+                {{ 'Demote' if u.role == 'admin' else 'Make Admin' }}
+              </button>
+            </form>
+            <form method="POST" action="/users/{{ u.id }}/delete"
+                  hx-post="/users/{{ u.id }}/delete"
+                  hx-confirm="Delete user {{ u.username }}? This cannot be undone."
+                  hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+              <button type="submit" class="outline small contrast"
+                      {% if u.id == current_user_id %}disabled title="Cannot delete your own account"{% endif %}>
+                Delete
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</article>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% if detectors %}
+<article>
+  <header>Detectors</header>
+  <table class="detector-table">
+    <thead>
+      <tr><th>Type</th><th>Enabled</th><th>Interval</th><th>Config</th></tr>
+    </thead>
+    <tbody>
+      {% for d in detectors %}
+      <tr class="detector-row {% if not d.enabled %}disabled{% endif %}">
+        <td><span class="detector-type detector-{{ d.type }}">{{ d.type }}</span></td>
+        <td>{{ "yes" if d.enabled else "no" }}</td>
+        <td>{{ d.interval_seconds }}s</td>
+        <td><code>{{ d.summary_str }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if has_roi or has_masks %}
+  <footer>
+    <small>
+      {% if has_roi %}ROI configured. {% endif %}
+      {% if has_masks %}{{ num_masks }} privacy mask(s).{% endif %}
+    </small>
+  </footer>
+  {% endif %}
+</article>
+{% else %}
+<article>
+  <header>No detectors configured</header>
+  <p>Add detectors to this camera in <code>config.yaml</code> and restart <code>rtsp-warden serve</code>.</p>
+  <pre><code>cameras:
+  - name: {{ camera_name }}
+    detectors:
+      - type: motion
+        enabled: true
+        interval_seconds: 1.0
+        min_area: 500</code></pre>
+</article>
+{% endif %}

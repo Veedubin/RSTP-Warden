@@ -1,0 +1,51 @@
+<table>
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>Version</th>
+      <th>Cameras</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{% if status.ok %}<span class="status-dot status-ok"></span> OK{% else %}<span class="status-dot status-error"></span> Issues{% endif %}</td>
+      <td>{{ version }}</td>
+      <td>{{ status.cameras | length }}</td>
+    </tr>
+  </tbody>
+</table>
+
+{% if status.cameras %}
+<h3>Camera status</h3>
+<table>
+  <thead>
+    <tr><th>Name</th><th>Status</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    {% for cam in status.cameras %}
+    <tr>
+      <td>{{ cam.name }}</td>
+      <td>{% if cam.ok %}<span class="status-dot status-ok"></span> OK{% else %}<span class="status-dot status-error"></span> Error{% endif %}</td>
+      <td>
+        {% if cam.streams %}
+        {% for stream_name, stream_data in cam.streams.items() %}
+        <small>{{ stream_name }}: {% if stream_data.ingest and stream_data.ingest.running %}running{% else %}stopped{% endif %}</small><br>
+        {% endfor %}
+        {% else %}
+        <small>No stream data</small>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if status.errors %}
+<h3>Errors</h3>
+<ul>
+  {% for err in status.errors %}
+  <li>{{ err }}</li>
+  {% endfor %}
+</ul>
+{% endif %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Log in{% endblock %}
+
+{% block nav %}{% endblock %}
+
+{% block content %}
+<article class="login-card">
+  <h1>Log in</h1>
+
+  {% if error %}
+  <ins data-color="danger" role="alert">{{ error }}</ins>
+  {% endif %}
+
+  <form method="POST" action="/login"
+        hx-post="/login"
+        hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" required
+           autocomplete="username" autofocus>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required
+           autocomplete="current-password">
+
+    <button type="submit">Log in</button>
+  </form>
+</article>
+
+<style>
+  .login-card {
+    max-width: 360px;
+    margin: 5rem auto;
+  }
+</style>
+{% endblock %}

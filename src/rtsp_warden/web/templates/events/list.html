@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Events{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Events</h1>
+  <p>{{ total }} event{{ 's' if total != 1 else '' }} found</p>
+</hgroup>
+
+{# Filter form #}
+<article>
+  <form method="GET" action="/events" class="filter-form">
+    <div class="grid">
+      <label>
+        Camera
+        <input type="text" name="camera" value="{{ filter_camera }}" placeholder="Camera name">
+      </label>
+      <label>
+        Type
+        <select name="event_type">
+          <option value="">All types</option>
+          <option value="motion" {% if filter_type == 'motion' %}selected{% endif %}>motion</option>
+          <option value="person" {% if filter_type == 'person' %}selected{% endif %}>person</option>
+          <option value="vehicle" {% if filter_type == 'vehicle' %}selected{% endif %}>vehicle</option>
+          <option value="ingest_lost" {% if filter_type == 'ingest_lost' %}selected{% endif %}>ingest_lost</option>
+        </select>
+      </label>
+      <label>
+        Severity
+        <select name="severity">
+          <option value="">All severities</option>
+          <option value="info" {% if filter_severity == 'info' %}selected{% endif %}>info</option>
+          <option value="warn" {% if filter_severity == 'warn' %}selected{% endif %}>warn</option>
+          <option value="error" {% if filter_severity == 'error' %}selected{% endif %}>error</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid">
+      <label>
+        Start
+        <input type="datetime-local" name="start" value="{{ filter_start }}">
+      </label>
+      <label>
+        End
+        <input type="datetime-local" name="end" value="{{ filter_end }}">
+      </label>
+    </div>
+    <button type="submit" class="secondary">Filter</button>
+  </form>
+</article>
+
+{% if events %}
+<div id="events-table"
+     hx-get="/events/partial"
+     hx-trigger="every 10s"
+     hx-swap="innerHTML">
+  <table>
+    <thead>
+      <tr><th>Time</th><th>Camera</th><th>Type</th><th>Severity</th><th>Message</th></tr>
+    </thead>
+    <tbody>
+      {% for evt in events %}
+      <tr>
+        <td><a href="/events/{{ evt.id }}">{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</a></td>
+        <td>{{ evt.camera_name }}</td>
+        <td>{{ evt.event_type }}</td>
+        <td><span class="severity-{{ evt.severity }}">{{ evt.severity }}</span></td>
+        <td>{{ evt.message[:80] if evt.message else '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Pagination #}
+<nav class="pagination">
+  {% if offset > 0 %}
+  <a href="/events?offset={{ max(0, offset - limit) }}&camera={{ filter_camera }}&event_type={{ filter_type }}&severity={{ filter_severity }}&start={{ filter_start }}&end={{ filter_end }}" class="button outline secondary">Previous</a>
+  {% endif %}
+  {% if offset + limit < total %}
+  <a href="/events?offset={{ offset + limit }}&camera={{ filter_camera }}&event_type={{ filter_type }}&severity={{ filter_severity }}&start={{ filter_start }}&end={{ filter_end }}" class="button outline">Next</a>
+  {% endif %}
+</nav>
+{% else %}
+<p><small>No events found.</small></p>
+{% endif %}
+{% endblock %}

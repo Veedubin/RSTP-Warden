@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+{# Stat cards row #}
+<div class="grid">
+  <article class="stat-card">
+    <header><small>Total cameras</small></header>
+    <h2>{{ cameras | length }}</h2>
+  </article>
+  <article class="stat-card">
+    <header><small>Recording</small></header>
+    <h2>{{ cameras | selectattr('record_enabled') | list | length }}</h2>
+  </article>
+  <article class="stat-card">
+    <header><small>Detections today</small></header>
+    <h2>{{ detections_today }}</h2>
+  </article>
+  <article class="stat-card">
+    <header><small>Recent events</small></header>
+    <h2>{{ recent_events | length }}</h2>
+  </article>
+  <article class="stat-card">
+    <header><small>System</small></header>
+    <h2>{% if status.ok %}OK{% else %}Issues{% endif %}</h2>
+  </article>
+</div>
+
+{# Camera grid #}
+{% if cameras %}
+<h2>Cameras</h2>
+<div class="camera-grid">
+  {% for cam in cameras %}
+  <article class="camera-card" id="camera-card-{{ cam.name }}"
+           hx-get="/cameras/{{ cam.name }}/status"
+           hx-trigger="every 5s"
+           hx-swap="outerHTML">
+    <header>
+      <a href="/cameras/{{ cam.name }}">{{ cam.name }}</a>
+      <span class="status-dot status-{{ cam.status }}"></span>
+    </header>
+    <div class="camera-card-body">
+      <small>
+        {% if cam.record_enabled %}Recording{% endif %}
+        {% if cam.record_enabled and cam.has_proxy %} + {% endif %}
+        {% if cam.has_proxy %}{{ cam.proxy_mode | upper }} :{{ cam.proxy_port }}{% endif %}
+      </small>
+      <br>
+      <small>{{ cam.main_url_redacted }}</small>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<article>
+  <p>No cameras configured. Add cameras to your <code>config.yaml</code> and restart.</p>
+</article>
+{% endif %}
+
+{# Recent recordings #}
+<h2>Recent recordings</h2>
+{% if recent_recordings %}
+<table>
+  <thead>
+    <tr><th>Time</th><th>Camera</th><th>Stream</th><th>Size</th></tr>
+  </thead>
+  <tbody>
+    {% for rec in recent_recordings %}
+    <tr>
+      <td>{{ rec.start_time.strftime('%Y-%m-%d %H:%M') if rec.start_time else '-' }}</td>
+      <td>{{ rec.camera_name }}</td>
+      <td>{{ rec.stream }}</td>
+      <td>{{ rec.size_bytes }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><small>No recordings yet.</small></p>
+{% endif %}
+
+{# Recent events #}
+<h2>Recent events</h2>
+{% if recent_events %}
+<table>
+  <thead>
+    <tr><th>Time</th><th>Camera</th><th>Type</th><th>Severity</th></tr>
+  </thead>
+  <tbody>
+    {% for evt in recent_events %}
+    <tr>
+      <td>{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</td>
+      <td>{{ evt.camera_name }}</td>
+      <td>{{ evt.event_type }}</td>
+      <td><span class="severity-{{ evt.severity }}">{{ evt.severity }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><small>No events yet.</small></p>
+{% endif %}
+{% endblock %}
