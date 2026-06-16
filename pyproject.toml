@@ -29,6 +29,7 @@ dependencies = [
   "aiofiles>=24.1.0",
   "httpx>=0.28.1",
   "zeep>=4.2.0",
+  "apprise>=1.9.0",
 ]
 
 [project.scripts]
@@ -45,12 +46,14 @@ dev = [
   "httpx>=0.28.1",
   "pytest>=8.0.0",
   "pytest-cov>=5.0.0",
+  "pytest-asyncio>=0.24",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

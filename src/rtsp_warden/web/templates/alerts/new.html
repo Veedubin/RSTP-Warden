@@ -28,7 +28,15 @@
       headers:
         Content-Type: "application/json"
       enabled: true
-      severities: ["error"]</code></pre>
+      severities: ["error"]
+    - name: "Gmail alerts"
+      type: apprise
+      urls:
+        - "mailto://user:pass@smtp.gmail.com:587"
+      title_template: "[{severity}] {camera_name}: {event_type}"
+      min_severity: warn
+      min_interval_seconds: 60
+      enabled: true</code></pre>
 </article>
 
 <p><a href="/alerts">Back to Alerts</a></p>

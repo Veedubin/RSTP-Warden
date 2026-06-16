@@ -11,7 +11,7 @@ import pytest
 
 from rtsp_warden.alerts import AlertManager, NtfyNotifier, WebhookNotifier, build_notifier
 from rtsp_warden.alerts.base import NotificationResult
-from rtsp_warden.config import AlertsConfig, NotifierSpec
+from rtsp_warden.config import AlertsConfig, NtifySpec, WebhookSpec
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,7 +179,7 @@ class TestAlertManager:
 
     def _make_manager(
         self,
-        notifiers: list[NotifierSpec],
+        notifiers: list[NtifySpec | WebhookSpec],
         enabled: bool = True,
         on_send: Any = None,
     ) -> AlertManager:
@@ -193,7 +193,7 @@ class TestAlertManager:
 
     def test_manager_filters_disabled_notifiers(self) -> None:
         """Disabled notifier is not called (returns error='disabled')."""
-        spec = NotifierSpec(
+        spec = WebhookSpec(
             name="disabled-one",
             type="webhook",
             url="https://example.com/hook",
@@ -208,7 +208,7 @@ class TestAlertManager:
 
     def test_manager_filters_by_severity(self) -> None:
         """Info event doesn't go to a notifier that only allows warn/error."""
-        spec = NotifierSpec(
+        spec = WebhookSpec(
             name="strict",
             type="webhook",
             url="https://example.com/hook",
@@ -222,7 +222,7 @@ class TestAlertManager:
 
     def test_manager_debounces_recent_sends(self) -> None:
         """Same (camera, type) within min_interval_seconds -> skipped."""
-        spec = NotifierSpec(
+        spec = WebhookSpec(
             name="debounced",
             type="webhook",
             url="https://example.com/hook",
@@ -241,13 +241,13 @@ class TestAlertManager:
 
     def test_manager_dispatches_in_parallel(self) -> None:
         """2 notifiers, both called."""
-        spec1 = NotifierSpec(
+        spec1 = WebhookSpec(
             name="hook1",
             type="webhook",
             url="https://example.com/hook1",
             severities=["info", "warn", "error"],
         )
-        spec2 = NotifierSpec(
+        spec2 = WebhookSpec(
             name="hook2",
             type="webhook",
             url="https://example.com/hook2",
@@ -263,13 +263,13 @@ class TestAlertManager:
 
     def test_manager_handles_notifier_exception(self) -> None:
         """One notifier raising doesn't break the others."""
-        spec_ok = NotifierSpec(
+        spec_ok = WebhookSpec(
             name="ok-notifier",
             type="webhook",
             url="https://example.com/hook",
             severities=["info", "warn", "error"],
         )
-        spec_bad = NotifierSpec(
+        spec_bad = NtifySpec(
             name="bad-notifier",
             type="ntfy",
             url="https://ntfy.sh",
@@ -307,8 +307,8 @@ class TestFactory:
     """Tests for build_notifier factory function."""
 
     def test_build_ntfy_notifier(self) -> None:
-        """build_notifier with type='ntfy' returns NtfyNotifier."""
-        spec = NotifierSpec(
+        """build_notifier with NtifySpec returns NtfyNotifier."""
+        spec = NtifySpec(
             name="phone",
             type="ntfy",
             url="https://ntfy.sh",
@@ -324,8 +324,8 @@ class TestFactory:
         assert notifier._priority == 4
 
     def test_build_webhook_notifier(self) -> None:
-        """build_notifier with type='webhook' returns WebhookNotifier."""
-        spec = NotifierSpec(
+        """build_notifier with WebhookSpec returns WebhookNotifier."""
+        spec = WebhookSpec(
             name="slack",
             type="webhook",
             url="https://hooks.slack.com/services/abc",
@@ -338,8 +338,8 @@ class TestFactory:
 
     def test_build_unknown_type_raises(self) -> None:
         """build_notifier with unknown type raises ValueError."""
-        # We need to bypass the Literal type to test this
-        spec = NotifierSpec(name="x", type="ntfy", url="https://ntfy.sh")
+        # Create a minimal spec and bypass type checks to test factory guard
+        spec = NtifySpec(name="x", type="ntfy", url="https://ntfy.sh")
         # Mutate type to test the factory guard
         object.__setattr__(spec, "type", "unknown")
         with pytest.raises(ValueError, match="unknown notifier type"):

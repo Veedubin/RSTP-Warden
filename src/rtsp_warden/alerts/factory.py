@@ -15,10 +15,11 @@ def build_notifier(spec: NotifierSpec) -> Notifier:
         spec: The notifier configuration from AppConfig.alerts.notifiers.
 
     Returns:
-        A Notifier implementation (NtfyNotifier or WebhookNotifier).
+        A Notifier implementation (NtfyNotifier, WebhookNotifier, or AppriseNotifier).
 
     Raises:
         ValueError: If the notifier type is unknown.
+        ImportError: If apprise is not installed for type="apprise".
     """
     if spec.type == "ntfy":
         return NtfyNotifier(
@@ -35,5 +36,9 @@ def build_notifier(spec: NotifierSpec) -> Notifier:
             method=spec.method,
             headers=spec.headers,
         )
+    elif spec.type == "apprise":
+        from .apprise import AppriseNotifier
+
+        return AppriseNotifier(spec=spec)
     else:
         raise ValueError(f"unknown notifier type: {spec.type}")

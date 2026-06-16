@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -95,7 +95,7 @@ class RecordConfig(BaseModel):
     mode: Literal["continuous", "event"] = "continuous"
 
     # Event-mode config: pre/post seconds of buffer to keep around events.
-    event_record: "EventRecordConfig" = Field(default_factory=lambda: EventRecordConfig())
+    event_record: EventRecordConfig = Field(default_factory=lambda: EventRecordConfig())
 
 
 class ProxyConfig(BaseModel):
@@ -136,6 +136,69 @@ class ProxyConfig(BaseModel):
         return v
 
 
+class OnvifEventConfig(BaseModel):
+    """Per-camera ONVIF event subscription configuration.
+
+    Attributes:
+        type: Event type filter -- "motion", "tamper", or "all".
+        min_interval_seconds: Minimum seconds between firing callbacks
+            for the same event type on this camera (debounce).
+    """
+
+    type: Literal["motion", "tamper", "all"] = "all"
+    min_interval_seconds: float = 30.0
+
+    @field_validator("min_interval_seconds")
+    @classmethod
+    def _min_interval_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("min_interval_seconds must be > 0")
+        return v
+
+
+class PTZPresetConfig(BaseModel):
+    """A named PTZ preset position for a camera.
+
+    Stored in CameraConfig.presets as a list. Each preset has a
+    human-readable name and normalized pan/tilt/zoom values.
+
+    Attributes:
+        name: Preset label (must be non-empty, max 64 chars).
+        pan: Pan position, -1.0 to 1.0.
+        tilt: Tilt position, -1.0 to 1.0.
+        zoom: Zoom level, 0.0 to 1.0.
+    """
+
+    name: str
+    pan: float
+    tilt: float
+    zoom: float
+
+    @field_validator("name")
+    @classmethod
+    def _name_nonempty(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("preset name must be non-empty")
+        if len(v2) > 64:
+            raise ValueError("preset name must be 64 characters or fewer")
+        return v2
+
+    @field_validator("pan", "tilt")
+    @classmethod
+    def _pan_tilt_range(cls, v: float) -> float:
+        if not -1.0 <= v <= 1.0:
+            raise ValueError("pan/tilt must be between -1.0 and 1.0")
+        return v
+
+    @field_validator("zoom")
+    @classmethod
+    def _zoom_range(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("zoom must be between 0.0 and 1.0")
+        return v
+
+
 class CameraConfig(BaseModel):
     name: str
     main_url: str
@@ -144,6 +207,8 @@ class CameraConfig(BaseModel):
     record: RecordConfig = Field(default_factory=RecordConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     detectors: list[DetectorSpec] = Field(default_factory=list)
+    events: list[OnvifEventConfig] = Field(default_factory=list)
+    presets: list[PTZPresetConfig] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -185,30 +250,19 @@ class EventRecordConfig(BaseModel):
         return v
 
 
-class NotifierSpec(BaseModel):
-    """Configuration for a single notifier (alert destination).
+class NtifySpec(BaseModel):
+    """Configuration for an ntfy.sh notifier."""
 
-    type: "ntfy" or "webhook"
-    For ntfy: url like "https://ntfy.sh/my-warden-alerts", optional topic, token, priority
-    For webhook: url (any HTTP endpoint), optional headers dict, template
-    """
-
-    name: str  # human label like "Family phone", "Slack #ops"
-    type: Literal["ntfy", "webhook"]
+    name: str
+    type: Literal["ntfy"]
     url: str
     enabled: bool = True
 
-    # ntfy-specific
     topic: str | None = None
     token: str | None = None
-    priority: int | None = None  # 1-5; default 3
+    priority: int | None = None
 
-    # webhook-specific
-    headers: dict[str, str] = Field(default_factory=dict)
-    method: Literal["POST", "PUT"] = "POST"
-
-    # Common
-    min_interval_seconds: int = 30  # debounce: don't fire the same notifier more often than this
+    min_interval_seconds: int = 30
     severities: list[Literal["info", "warn", "error"]] = Field(
         default_factory=lambda: ["warn", "error"]
     )
@@ -220,6 +274,86 @@ class NotifierSpec(BaseModel):
         if not v2:
             raise ValueError("url must be non-empty")
         return v2
+
+
+class WebhookSpec(BaseModel):
+    """Configuration for a generic webhook notifier."""
+
+    name: str
+    type: Literal["webhook"]
+    url: str
+    enabled: bool = True
+
+    headers: dict[str, str] = Field(default_factory=dict)
+    method: Literal["POST", "PUT"] = "POST"
+
+    min_interval_seconds: int = 30
+    severities: list[Literal["info", "warn", "error"]] = Field(
+        default_factory=lambda: ["warn", "error"]
+    )
+
+    @field_validator("url")
+    @classmethod
+    def _url_nonempty(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("url must be non-empty")
+        return v2
+
+
+# Severity level mapping for AppriseSpec.min_severity
+_SEVERITY_ORDER: dict[str, list[str]] = {
+    "info": ["info", "warn", "error"],
+    "warn": ["warn", "error"],
+    "error": ["error"],
+}
+
+
+class AppriseSpec(BaseModel):
+    """Configuration for an Apprise notifier (email + 90+ services).
+
+    urls: list of Apprise URL strings (e.g. "mailto://user:pass@smtp.gmail.com:587").
+    title_template: optional Python format string for notification titles.
+        Available keys: {camera_name}, {event_type}, {severity}.
+        Defaults to "[{severity}] {camera_name}: {event_type}" if not set.
+    min_severity: minimum severity level that triggers this notifier.
+        "info" -> all, "warn" -> warn+error, "error" -> error only.
+    """
+
+    name: str
+    type: Literal["apprise"]
+    urls: list[str]
+    enabled: bool = True
+    title_template: str | None = None
+    min_interval_seconds: float = 60.0
+    min_severity: str = "info"
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("urls")
+    @classmethod
+    def _urls_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("urls must contain at least one Apprise URL")
+        cleaned = [u.strip() for u in v if u.strip()]
+        if not cleaned:
+            raise ValueError("urls must contain at least one non-empty Apprise URL")
+        return cleaned
+
+    @field_validator("min_severity")
+    @classmethod
+    def _min_severity_valid(cls, v: str) -> str:
+        if v not in _SEVERITY_ORDER:
+            raise ValueError(f"min_severity must be one of {list(_SEVERITY_ORDER)}")
+        return v
+
+    @property
+    def severities(self) -> list[str]:
+        """Derive severities list from min_severity for AlertManager compatibility."""
+        return _SEVERITY_ORDER[self.min_severity]
+
+
+NotifierSpec = Annotated[NtifySpec | WebhookSpec | AppriseSpec, Field(discriminator="type")]
 
 
 class AlertsConfig(BaseModel):
@@ -234,27 +368,75 @@ class AlertsConfig(BaseModel):
 
 
 class OnvifConfig(BaseModel):
-    """ONVIF camera discovery + PTZ config.
+    """ONVIF camera discovery + PTZ + events config.
 
     discovery_enabled: enable WS-Discovery (UDP multicast on 239.255.255.250:3702)
     ptz_enabled: enable PTZ control surface (requires ONVIF device service on camera)
+    events_enabled: enable ONVIF event subscriptions (PullPoint polling)
     discovery_timeout_seconds: how long to wait for probe responses
     ptz_timeout_seconds: per-PTZ-command HTTP timeout
+    events_poll_interval_seconds: seconds between PullMessages calls
     username/password: optional default credentials used when not overridden per-camera
     """
 
     discovery_enabled: bool = False  # opt-in (network noise on default networks)
     ptz_enabled: bool = False
+    events_enabled: bool = False
     discovery_timeout_seconds: int = 5
     ptz_timeout_seconds: int = 10
+    events_poll_interval_seconds: int = 10
     username: str | None = None
     password: str | None = None
 
-    @field_validator("discovery_timeout_seconds", "ptz_timeout_seconds")
+    @field_validator(
+        "discovery_timeout_seconds", "ptz_timeout_seconds", "events_poll_interval_seconds"
+    )
     @classmethod
     def _positive(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("value must be > 0")
+        return v
+
+
+class DNNDetectorConfig(BaseModel):
+    """Configuration for the YOLOv4-tiny DNN detector.
+
+    This config type is used within DetectorSpec.config when
+    type="dnn". It provides typed defaults and validation for
+    the DNN detector parameters.
+
+    Fields:
+        type: Detector type discriminator, always "dnn".
+        model: Pretrained model name. Currently only "yolov4-tiny" is
+            supported. Determines which .cfg and .weights files are used.
+        confidence: Minimum confidence threshold (0.0-1.0). Detections
+            below this threshold are discarded.
+        nms_threshold: Non-maximum suppression threshold (0.0-1.0).
+            Higher values keep more overlapping detections.
+        classes: List of COCO class names to detect. When None, defaults
+            to vehicle + animal classes (car, truck, bus, motorcycle,
+            bicycle, bird, cat, dog, horse, sheep, cow, elephant, bear,
+            zebra, giraffe).
+    """
+
+    type: Literal["dnn"] = "dnn"
+    model: str = "yolov4-tiny"
+    confidence: float = 0.5
+    nms_threshold: float = 0.4
+    classes: list[str] | None = None
+
+    @field_validator("confidence")
+    @classmethod
+    def _confidence_range(cls, v: float) -> float:
+        if not 0.0 < v <= 1.0:
+            raise ValueError("confidence must be in (0.0, 1.0]")
+        return v
+
+    @field_validator("nms_threshold")
+    @classmethod
+    def _nms_range(cls, v: float) -> float:
+        if not 0.0 < v <= 1.0:
+            raise ValueError("nms_threshold must be in (0.0, 1.0]")
         return v
 
 
@@ -293,11 +475,33 @@ class RuntimeConfig(BaseModel):
         return v
 
 
+class ClipsConfig(BaseModel):
+    """Clip generation configuration.
+
+    Controls the time window around an event used to generate
+    downloadable MP4 clips from HLS segments.
+    """
+
+    enabled: bool = True
+    pre_seconds: float = 10.0
+    post_seconds: float = 10.0
+    output_dir: str = "{recordings_root}/../clips"
+    max_duration: float = 120.0
+
+    @field_validator("pre_seconds", "post_seconds", "max_duration")
+    @classmethod
+    def _positive_float(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("value must be > 0")
+        return v
+
+
 class AppConfig(BaseModel):
     cameras: list[CameraConfig]
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     onvif: OnvifConfig = Field(default_factory=OnvifConfig)
+    clips: ClipsConfig = Field(default_factory=ClipsConfig)
 
 
 def load_config(path: str | Path) -> AppConfig:

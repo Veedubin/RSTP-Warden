@@ -54,6 +54,7 @@ EXPECTED_TABLES = {
     "recordings",
     "events",
     "ingest_health",
+    "clips",
 }
 
 
