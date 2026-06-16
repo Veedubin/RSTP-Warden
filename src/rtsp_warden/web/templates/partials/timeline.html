@@ -4,6 +4,14 @@
      data-stream="{{ recording.stream }}"
      data-start-ts="{{ recording.start_time.timestamp() if recording.start_time else 0 }}"
      style="position:relative; margin-bottom:1rem;">
+  <div id="timeline-legend" style="display:flex; gap:12px; flex-wrap:wrap; font-size:0.75rem; margin-bottom:4px; color:#ccc;">
+    <span style="display:flex; align-items:center; gap:3px;"><span style="display:inline-block; width:10px; height:10px; background:#e74c3c; border-radius:2px;"></span>Person</span>
+    <span style="display:flex; align-items:center; gap:3px;"><span style="display:inline-block; width:10px; height:10px; background:#3498db; border-radius:2px;"></span>Pet</span>
+    <span style="display:flex; align-items:center; gap:3px;"><span style="display:inline-block; width:10px; height:10px; background:#f1c40f; border-radius:2px;"></span>Critter</span>
+    <span style="display:flex; align-items:center; gap:3px;"><span style="display:inline-block; width:10px; height:10px; background:#e67e22; border-radius:2px;"></span>Vehicle</span>
+    <span style="display:flex; align-items:center; gap:3px;"><span style="display:inline-block; width:10px; height:10px; background:#7f8c8d; border-radius:2px;"></span>Other</span>
+    <span style="margin-left:8px; color:#888;">Line: --- info &mdash; warn &#9646; error</span>
+  </div>
   <canvas id="timeline-canvas" width="800" height="80" style="width:100%; height:80px; cursor:pointer;"></canvas>
   <div id="timeline-tooltip" style="display:none; position:absolute; background:rgba(0,0,0,0.85); color:#eee; font-size:0.75rem; padding:4px 8px; border-radius:3px; pointer-events:none; white-space:nowrap; z-index:10;"></div>
 </div>

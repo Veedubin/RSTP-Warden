@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .detectors.registry import DetectorSpec
 
@@ -199,6 +199,53 @@ class PTZPresetConfig(BaseModel):
         return v
 
 
+class GridZoneConfig(BaseModel):
+    """Grid-based detection zone for a camera.
+
+    Divides the frame into an NxM grid of cells. Detections whose
+    bounding-box center falls within a blocked cell are discarded;
+    cells NOT in blocked_cells are active (detections are kept).
+
+    Attributes:
+        name: Human-readable zone label, e.g. "exclude road".
+        grid_cols: Number of columns in the grid (2-64).
+        grid_rows: Number of rows in the grid (2-64).
+        blocked_cells: Set of (col, row) tuples that block detections.
+            Cells NOT in this set are active.
+        frame_width: Snapshot resolution width at time of save.
+        frame_height: Snapshot resolution height at time of save.
+        enabled: Whether this zone is active.
+    """
+
+    name: str
+    grid_cols: int = 16
+    grid_rows: int = 16
+    blocked_cells: set[tuple[int, int]] = set()
+    frame_width: int
+    frame_height: int
+    enabled: bool = True
+
+    @field_validator("grid_cols", "grid_rows")
+    @classmethod
+    def _grid_bounds(cls, v: int) -> int:
+        if v < 2:
+            raise ValueError("grid_cols and grid_rows must be >= 2")
+        if v > 64:
+            raise ValueError("grid_cols and grid_rows must be <= 64")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_blocked_cells(self) -> GridZoneConfig:
+        """Validate that all blocked_cells are within grid dimensions."""
+        for col, row in self.blocked_cells:
+            if not (0 <= col < self.grid_cols) or not (0 <= row < self.grid_rows):
+                raise ValueError(
+                    f"blocked cell ({col},{row}) out of bounds for "
+                    f"{self.grid_cols}x{self.grid_rows} grid"
+                )
+        return self
+
+
 class CameraConfig(BaseModel):
     name: str
     main_url: str
@@ -210,6 +257,12 @@ class CameraConfig(BaseModel):
     events: list[OnvifEventConfig] = Field(default_factory=list)
     presets: list[PTZPresetConfig] = Field(default_factory=list)
 
+    # Sprint 6 additions
+    retention: RetentionConfig | None = None  # per-camera override
+    zones: list[GridZoneConfig] = Field(default_factory=list)
+    sensitivity: float = 50.0  # 0-100 scale, used for ALL detectors
+    detect_classes: list[str] | None = None  # intersection with detector's allowed_classes
+
     @field_validator("name")
     @classmethod
     def _name_nonempty(cls, v: str) -> str:
@@ -217,6 +270,13 @@ class CameraConfig(BaseModel):
         if not v2:
             raise ValueError("name must be non-empty")
         return v2
+
+    @field_validator("sensitivity")
+    @classmethod
+    def _sensitivity_range(cls, v: float) -> float:
+        if not 0.0 <= v <= 100.0:
+            raise ValueError("sensitivity must be between 0.0 and 100.0")
+        return v
 
 
 # --- Sprint 4: event recording + alerts + ONVIF config types ---
@@ -502,6 +562,7 @@ class AppConfig(BaseModel):
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     onvif: OnvifConfig = Field(default_factory=OnvifConfig)
     clips: ClipsConfig = Field(default_factory=ClipsConfig)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)  # global fallback
 
 
 def load_config(path: str | Path) -> AppConfig:

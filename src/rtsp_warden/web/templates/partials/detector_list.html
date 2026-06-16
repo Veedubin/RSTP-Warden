@@ -3,7 +3,7 @@
   <header>Detectors</header>
   <table class="detector-table">
     <thead>
-      <tr><th>Type</th><th>Enabled</th><th>Interval</th><th>Config</th></tr>
+      <tr><th>Type</th><th>Enabled</th><th>Interval</th><th>Config</th><th>Toggle</th></tr>
     </thead>
     <tbody>
       {% for d in detectors %}
@@ -12,6 +12,20 @@
         <td>{{ "yes" if d.enabled else "no" }}</td>
         <td>{{ d.interval_seconds }}s</td>
         <td><code>{{ d.summary_str }}</code></td>
+        <td>
+          <form method="POST" action="/cameras/{{ camera_name }}/detectors/{{ d.type }}/enabled"
+                style="display:inline"
+                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.type }}/enabled"
+                hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+            <input type="hidden" name="csrf_token"
+                   value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <input type="hidden" name="enabled" value="{{ 'false' if d.enabled else 'true' }}">
+            <button type="submit" class="{% if d.enabled %}secondary{% else %}contrast{% endif %} outline"
+                    style="display:inline">
+              {{ 'Disable' if d.enabled else 'Enable' }}
+            </button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

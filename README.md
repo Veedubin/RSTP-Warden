@@ -1,4 +1,4 @@
-# rtsp-warden v1.1.0
+# rtsp-warden v1.2.0
 
 
 `rtsp-warden` is a self-hosted Network Video Recorder (NVR). It pulls RTSP camera streams, records them to disk in time-chunked segments, and provides a web UI for live viewing, playback, and administration.
@@ -11,7 +11,36 @@ The v1.0.0 release closes the gap to a complete self-hosted NVR:
 - **Audio** opt-in per camera (`record.audio: true`). Falls back to silent if the source RTSP has no audio track.
 - **Recording modes** — `continuous` (default, 24/7) or `event` (records N seconds before/after detector events). Polls the events table to start/stop ffmpeg.
 - **ONVIF discovery + PTZ** — WS-Discovery finds ONVIF cameras on the LAN; PTZ control via SOAP (left/right/up/down/zoom/stop). `/onvif` page (admin).
-- **Timeline canvas** — Recording detail page now has a visual scrubber. Click any time to load the HLS playlist at that point. Event markers color-coded by severity.
+## Timeline canvas
+
+Recording detail page now has a visual scrubber. Click any time to load the HLS playlist at that point.
+
+### Object-type colored markers
+
+v1.2.0 replaces severity-based colors with object-type categorization. Markers on the timeline are now colored by the type of object detected, allowing for a quick visual scan of "who" was detected without opening the event detail.
+
+**Color Legend:**
+| Color | Category | Labels |
+|-------|----------|--------|
+| Red | Person | `person` |
+| Blue | Pet | `cat`, `dog` |
+| Green | Critter | `deer`, `raccoon`, `fox`, `squirrel`, etc. |
+| Orange | Vehicle | `car`, `truck`, `bus`, `motorcycle` |
+| Purple | Animal | `bird`, `horse`, `sheep`, `cow`, etc. |
+| Gray | Other | `motion`, `tamper`, unknown labels |
+
+**Severity Signal:**
+To maintain visibility of alert severity, the marker line style is used:
+- **Info**: Dashed line
+- **Warn**: Solid line
+- **Error**: Thick solid line
+
+**Usage Notes:**
+- This categorization is handled automatically by the `categorize_object()` service.
+- MotionCatcher events always map to "Other" (Gray) as they lack a specific object class.
+
+## Alembic migrations
+
 - **Alembic migrations** — Schema is now version-controlled. Auto-stamps legacy databases, applies new migrations on `serve`.
 - **Docker image** — Multi-stage Dockerfile, ~1.2GB, runs as non-root. `docker-compose.yml` with optional PostgreSQL.
 - **Systemd unit** — Hardened service file, idempotent install/uninstall scripts.
@@ -46,7 +75,7 @@ The full **web UI** is now shipped. A FastAPI app runs in a daemon thread inside
 
 CLI: `rtsp-warden run` is now deprecated in favor of `rtsp-warden serve` (alias still works). The standalone health server is gone — `/healthz`, `/status.json`, `/metrics` are served on the web UI's port (default 8080).
 
-**528 tests pass**, 0 lint errors in new code.
+**780 tests pass**, 0 lint errors in new code.
 
 ## Quick start
 
@@ -91,6 +120,19 @@ Open **http://127.0.0.1:8080/** and log in with the admin password printed durin
 | `GET /cameras/{name}` | user | Camera detail with live MJPEG |
 | `GET /cameras/{name}/settings` | admin | Camera config (read-only) |
 | `GET /cameras/{name}/detectors` | user | Detector list (htmx partial) |
+| `GET /cameras/{name}/retention` | admin | Get current retention policy |
+| `POST /cameras/{name}/retention` | admin | Update retention policy |
+| `GET /cameras/{name}/zones` | admin | Grid zone editor page |
+| `GET /cameras/{name}/zones/editor` | admin | Grid zone editor helper |
+| `POST /cameras/{name}/zones` | admin | Save zone configuration |
+| `POST /cameras/{name}/zones/{zone_name}/delete` | admin | Delete specific zone |
+| `POST /cameras/{name}/zones/reload` | admin | Hot-reload zones |
+| `GET /cameras/{name}/sensitivity` | admin | Get camera sensitivity |
+| `POST /cameras/{name}/sensitivity` | admin | Update camera sensitivity |
+| `GET /cameras/{name}/detection-classes` | admin | Get allowed detection classes |
+| `POST /cameras/{name}/detection-classes` | admin | Update allowed detection classes |
+| `POST /cameras/{name}/detectors/{det_type}/enabled` | admin | Toggle detector status |
+| `POST /cameras/{name}/reload` | admin | Hot-reload camera configuration |
 | `GET /recordings` | user | Recording list with filter |
 | `GET /recordings/{id}` | user | Recording detail with HLS player |
 | `GET /events` | user | Event list with filter |
@@ -220,7 +262,42 @@ Recording is time-segmented using FFmpeg's `segment` muxer (remux / copy).
 - **Output layout**: `{output_dir}/{camera}/{stream}/...`
 - **Retention**: Rules are optional and configured per camera under `record.retention`.
 
+### Per-camera data retention
+
+v1.2.0 introduces a three-tier resolution chain for data retention. The system checks for a policy in the following order of precedence:
+1. **Camera Override**: Defined directly under the camera in `config.yaml` via the `retention` field.
+2. **Recording Policy**: Defined under `record.retention` for that specific camera.
+3. **Global Fallback**: Defined at the root of `config.yaml` under the global `retention` key.
+
+This allow administrators to keep high-value footage (e.g., a front door) for 90 days while letting low-priority cameras (e.g., a hallway) expire after 7 days, all while maintaining a safe global default.
+
+**Configuration Example:**
+```yaml
+# Global fallback (applies to cameras without overrides)
+retention:
+  max_days: 30
+  max_gb: 50.0
+  keep_last_n: 100
+
+cameras:
+  - name: front_door
+    # Per-camera override: keep front door footage longer
+    retention:
+      max_days: 90
+      max_gb: 100.0
+  - name: hallway
+    # Falls back to global policy
+```
+
+**Usage Notes:**
+- Effective retention settings are visible on the camera settings page in the Web UI.
+- If no policy is found in any tier, the `RetentionManager` remains a no-op and no files are deleted.
+
+**Limitations:**
+- Changes to retention policies are applied during the next scheduled cleanup interval.
+
 ### Recording Playback
+
 
 The web UI provides HLS-based playback of historical recordings via the HTL (HLS Timeline) endpoint.
 
@@ -270,7 +347,7 @@ The detector framework runs real-time analysis on camera frames. Detectors are c
 
 Deep learning detectors replace traditional Haar cascades for significantly higher accuracy in vehicle, animal, and person detection. The `dnn` detector uses OpenCV's DNN module to run pre-trained models.
 
-By default, `rtsp-warden` bundles the `yolov4-tiny` configuration and COCO class names. Weights are automatically downloaded to `~/.cache/rtsp-warden/models/` upon first use to keep the installation package lightweight. It can detect 80 standard COCO classes (e.g., car, truck, dog, cat, person).
+By default, `rtsp-warden` bundles the `yolov4-tiny` configuration and COCO class names. Weights are automatically downloaded to `~/.cache/rtsp-warden/modelss/` upon first use to keep the installation package lightweight. It can detect 80 standard COCO classes (e.g., car, truck, dog, cat, person).
 
 **Configuration Example:**
 ```yaml
@@ -292,7 +369,61 @@ cameras:
 - Requires a modern CPU with AVX/AVX2 support for acceptable performance.
 - Initial startup is slightly delayed on the first run due to weight downloads.
 
+### Tunable detection classes
+
+v1.2.0 allows specifying which object classes should be detected on a per-camera basis via the `detect_classes` field. This acts as a master filter that intersects with the specific detector's configuration.
+
+**Resolution Logic:**
+- If both `camera.detect_classes` and `detector.classes` are set, only the **intersection** of the two lists is detected.
+- If only `camera.detect_classes` is set, that list is used.
+- If only `detector.classes` is set, the detector's list is used.
+- If neither is set, all supported classes are detected.
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: front_door
+    detect_classes: [person, dog, cat] # Only these will be detected, regardless of detector defaults
+    detectors:
+      - type: dnn
+        enabled: true
+```
+
+**Usage Notes:**
+- This filter is only applicable to `dnn` detectors. Standard `motion`, `person`, and `vehicle` detectors ignore this field as they have fixed targets.
+- Matching is case-insensitive.
+
+**Limitations:**
+- An empty intersection (where the camera and detector disagree on all classes) results in zero detections being reported for that detector.
+
+### Per-camera sensitivity
+
+A 0-100 sensitivity knob is available per camera, providing a simplified way to tune multiple detectors simultaneously without manually editing confidence thresholds.
+
+**Mapping Formulas:**
+- **Motion**: `sensitivity = 1.0 - (camera_sensitivity / 100.0)`
+- **Person/DNN Confidence**: `confidence = 1.0 - (camera_sensitivity / 100.0)`
+- **DNN NMS**: `nms = 0.3 + (1 - camera_sensitivity/100) * 0.3`
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: front_door
+    sensitivity: 75 # Higher = more sensitive (lower thresholds)
+    detectors:
+      - type: motion
+        enabled: true
+```
+
+**Usage Notes:**
+- Values can be adjusted via a slider on the camera detail page.
+- **Priority**: Explicitly set fields within a `DetectorSpec` (e.g., `min_confidence: 0.8`) always override the camera-level sensitivity mapping.
+
+**Limitations:**
+- Sensitivity changes take effect upon the next detector restart or application reload.
+
 ### CLI flags
+
 
 ```bash
 rtsp-warden serve --detectors        # enable detector processing (default)
@@ -354,7 +485,38 @@ detectors:
 - **ROI**: Only detections whose center falls inside the polygon are kept.
 - **Masks**: Polygon regions are blacked out before the detector sees the frame.
 
+### Grid-based detection zones
+
+v1.2.0 introduces "block the road" style detection zones using a customizable grid overlay. This allows for rapid definition of active zones without manually calculating polygon coordinates.
+
+**How it works:**
+The frame is divided into an NxM grid (default 8x8). You can enable or disable specific cells. A detection is kept if its bounding box center falls within any enabled cell.
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: driveway
+    zones:
+      - name: main_drive
+        grid_cols: 8
+        grid_rows: 8
+        frame_width: 1920
+        frame_height: 1080
+        enabled_cells:
+          - [3, 4]
+          - [4, 4]
+          - [5, 4]
+```
+
+**Usage Notes:**
+- A visual grid editor is available at `/cameras/{name}/zones`.
+- **Interaction**: Grid zones act as a secondary filter. If a primary polygon ROI is also defined, a detection must pass both the polygon ROI and at least one enabled grid cell.
+
+**Limitations:**
+- Zones are tied to the configured `frame_width` and `frame_height`. If the camera resolution changes, zones must be updated.
+
 ## Proxying
+
 
 ### Unified Ingest
 For each `(camera, stream)`, the supervisor uses **one upstream RTSP pull** and fans out to recording, MJPEG proxying, and frame taps. This prevents multiple upstream connections per camera.

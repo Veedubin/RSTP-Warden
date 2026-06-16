@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import signal
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -9,8 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import AppConfig, CameraConfig
-from .detectors.registry import build_detector, build_masks, build_roi
-from .detectors.roi import Mask
+from .detectors.registry import build_detectors_for_camera
 from .detectors.runner import DetectorRunner
 from .detectors.sinks import EventSink
 from .ffmpeg import ExponentialBackoff
@@ -19,6 +19,7 @@ from .proxy.mjpeg import FrameHub, MjpegProxyServer
 from .proxy.rtsp_mediamtx import MediaMTXProxyServer
 from .recorder import CameraRecorder
 from .retention import RetentionManager
+from .retention_resolver import resolve_retention
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class AppRuntime:
     detectors_enabled: bool = True
     detector_runners: list[DetectorRunner] = field(default_factory=list)
     _event_sink: EventSink | None = field(default=None, init=False, repr=False)
+    _detector_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def build(self) -> None:
         self.cameras = []
@@ -76,10 +78,11 @@ class AppRuntime:
 
             retention = None
             if cam.record.enabled:
+                effective_retention = resolve_retention(cam, self.cfg.retention)
                 retention = RetentionManager(
                     camera_name=cam.name,
                     camera_root=cam.record.output_dir / cam.name,
-                    cfg=cam.record.retention,
+                    cfg=effective_retention,
                 )
 
             rec_backoff = ExponentialBackoff(
@@ -292,41 +295,17 @@ class AppRuntime:
             if not enabled_specs:
                 continue
 
-            detectors = []
-            for spec in enabled_specs:
-                try:
-                    det = build_detector(spec, cam.name)
-                    detectors.append(det)
-                except Exception:
-                    log.warning(
-                        "failed to build detector type=%s for camera=%s",
-                        spec.type,
-                        cam.name,
-                        exc_info=True,
-                    )
-
-            if not detectors:
+            bundle = build_detectors_for_camera(cam, cam.detectors)
+            if not bundle.detectors:
                 continue
-
-            # Build ROI and masks from the first spec that defines them
-            # (all specs for a camera share the same runner, so ROI/masks
-            # come from the first spec that has them)
-            runner_roi = None
-            runner_masks: list[Mask] = []
-            for spec in enabled_specs:
-                roi = build_roi(spec)
-                masks = build_masks(spec)
-                if roi is not None:
-                    runner_roi = roi
-                if masks:
-                    runner_masks.extend(masks)
 
             runner = DetectorRunner(
                 name=f"detector_{cam.name}",
-                detectors=tuple(detectors),
+                detectors=tuple(bundle.detectors),
                 result_sinks=[self._event_sink],
-                masks=runner_masks,
-                roi=runner_roi,
+                masks=bundle.masks,
+                roi=bundle.roi,
+                grid_masks=bundle.grid_masks,
             )
             self.detector_runners.append(runner)
 
@@ -339,6 +318,93 @@ class AppRuntime:
             else:
                 # Create a dispatcher just for detectors
                 self.frame_tap_dispatcher = FrameTapDispatcher(consumers=(runner,))
+
+    def rebuild_camera_detectors(self, camera_name: str) -> None:
+        """Rebuild detectors for a single camera and atomically swap the runner.
+
+        Reads the current camera config (in-memory), rebuilds the detector
+        runner for that camera, and swaps it into the active runtime under
+        a lock so no frames are dropped during the transition.
+
+        Args:
+            camera_name: Name of the camera whose detectors to rebuild.
+
+        Raises:
+            ValueError: If the camera name is not found.
+        """
+        # Find the CameraRuntime for this camera.
+        cam_rt = None
+        for rt in self.cameras:
+            if rt.camera.name == camera_name:
+                cam_rt = rt
+                break
+        if cam_rt is None:
+            raise ValueError(f"camera {camera_name!r} not found")
+
+        cam = cam_rt.camera
+        enabled_specs = [s for s in cam.detectors if s.enabled]
+        if not enabled_specs:
+            # No detectors for this camera -- remove any existing runner.
+            with self._detector_lock:
+                old_runners = [
+                    r for r in self.detector_runners if r.name == f"detector_{camera_name}"
+                ]
+                for r in old_runners:
+                    r.teardown()
+                self.detector_runners = [
+                    r for r in self.detector_runners if r.name != f"detector_{camera_name}"
+                ]
+            return
+
+        bundle = build_detectors_for_camera(cam, cam.detectors)
+        if not bundle.detectors:
+            # No detectors built -- remove any existing runner.
+            with self._detector_lock:
+                old_runners = [
+                    r for r in self.detector_runners if r.name == f"detector_{camera_name}"
+                ]
+                for r in old_runners:
+                    r.teardown()
+                self.detector_runners = [
+                    r for r in self.detector_runners if r.name != f"detector_{camera_name}"
+                ]
+            return
+
+        if self._event_sink is None:
+            self._event_sink = EventSink()
+
+        new_runner = DetectorRunner(
+            name=f"detector_{cam.name}",
+            detectors=tuple(bundle.detectors),
+            result_sinks=[self._event_sink],
+            masks=bundle.masks,
+            roi=bundle.roi,
+            grid_masks=bundle.grid_masks,
+        )
+
+        with self._detector_lock:
+            # Teardown old runners for this camera.
+            old_runners = [r for r in self.detector_runners if r.name == f"detector_{camera_name}"]
+            for r in old_runners:
+                r.teardown()
+
+            # Remove old runners and add new one.
+            self.detector_runners = [
+                r for r in self.detector_runners if r.name != f"detector_{camera_name}"
+            ]
+            self.detector_runners.append(new_runner)
+
+        # Setup and wire into dispatcher.
+        new_runner.setup()
+
+        if self.frame_tap_dispatcher is not None:
+            existing = list(self.frame_tap_dispatcher.consumers)
+            # Remove old runner consumers for this camera.
+            existing = [
+                c for c in existing if not hasattr(c, "name") or c.name != f"detector_{camera_name}"
+            ]
+            existing.append(new_runner)
+            self.frame_tap_dispatcher.consumers = tuple(existing)
 
     def _status_table(self) -> None:
         table = Table(title="rtsp-warden status", show_lines=False)

@@ -73,6 +73,8 @@ def get_recording_timeline(
                 "type": e.event_type,
                 "severity": e.severity,
                 "ts": e.ts_unix,
+                "object_type": e.object_type,
+                "color": e.color,
             }
             for e in timeline.events
         ],

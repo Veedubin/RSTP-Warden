@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .base import Detection, Detector
+from .grid_mask import GridMask
 from .roi import ROI, Mask, apply_masks, filter_by_roi
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class DetectorRunner:
     worker_count: int = 2
     masks: list[Mask] = field(default_factory=list)
     roi: ROI | None = None
+    grid_masks: list[GridMask] = field(default_factory=list)
     swallow_exceptions: bool = True
 
     def __post_init__(self) -> None:
@@ -170,6 +172,10 @@ class DetectorRunner:
 
         # Filter detections by ROI (discard those outside)
         all_detections = filter_by_roi(all_detections, self.roi)
+
+        # Filter detections by grid masks (discard those in blocked cells)
+        for gm in self.grid_masks:
+            all_detections = gm.filter_detections(all_detections)
 
         self._frames_processed += 1
         self._detections_total += len(all_detections)
