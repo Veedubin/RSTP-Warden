@@ -20,6 +20,7 @@ from .routes.alerts import router as alerts_router
 from .routes.api import router as api_router
 from .routes.auth import router as auth_router
 from .routes.cameras import router as cameras_router
+from .routes.clips import router as clips_router
 from .routes.dashboard import router as dashboard_router
 from .routes.events import router as events_router
 from .routes.health import router as health_router
@@ -99,6 +100,7 @@ def create_app(
     app.include_router(tokens_router)
     app.include_router(settings_router)
     app.include_router(alerts_router)
+    app.include_router(clips_router)
     app.include_router(onvif_router)
 
     return app

@@ -28,5 +28,28 @@
 </article>
 {% endif %}
 
+{% if clips_enabled %}
+<article>
+  <header>Clip</header>
+  {% if clips %}
+    {% for clip in clips %}
+      {% if clip.status == 'ready' %}
+        <p><a href="/clips/{{ clip.id }}/download" role="button">Download Clip</a>
+        <a href="/clips/{{ clip.id }}">View details</a></p>
+      {% elif clip.status == 'pending' %}
+        <p>Clip generation in progress...</p>
+      {% elif clip.status == 'failed' %}
+        <p>Clip generation failed. <a href="/events/{{ event.id }}/clip" role="button" class="secondary">Retry</a></p>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <form hx-post="/events/{{ event.id }}/clip" hx-swap="outerHTML" hx-target="#clip-result">
+      <button id="generate-clip-btn" type="submit">Generate Clip</button>
+    </form>
+    <div id="clip-result"></div>
+  {% endif %}
+</article>
+{% endif %}
+
 <p><a href="/events">&larr; Back to events</a></p>
 {% endblock %}

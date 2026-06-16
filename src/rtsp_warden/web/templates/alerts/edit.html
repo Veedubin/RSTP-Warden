@@ -17,6 +17,22 @@
     <dd>{{ notifier.name }}</dd>
     <dt>Type</dt>
     <dd>{{ notifier.type }}</dd>
+    {% if notifier.type == "apprise" %}
+    <dt>URLs</dt>
+    {% for url in notifier.urls %}
+    <dd><code>{{ url }}</code></dd>
+    {% endfor %}
+    {% if notifier.title_template %}
+    <dt>Title Template</dt>
+    <dd><code>{{ notifier.title_template }}</code></dd>
+    {% endif %}
+    <dt>Min Severity</dt>
+    <dd>{{ notifier.min_severity }}</dd>
+    <dt>Min Interval</dt>
+    <dd>{{ notifier.min_interval_seconds }}s</dd>
+    <dt>Enabled</dt>
+    <dd>{{ "Yes" if notifier.enabled else "No" }}</dd>
+    {% elif notifier.type == "ntfy" %}
     <dt>URL</dt>
     <dd><code>{{ notifier.url }}</code></dd>
     <dt>Enabled</dt>
@@ -31,7 +47,16 @@
     {% endif %}
     <dt>Severities</dt>
     <dd>{{ notifier.severities | join(', ') }}</dd>
-    <dt>Min interval</dt>
+    <dt>Min Interval</dt>
+    <dd>{{ notifier.min_interval_seconds }}s</dd>
+    {% elif notifier.type == "webhook" %}
+    <dt>URL</dt>
+    <dd><code>{{ notifier.url }}</code></dd>
+    <dt>Enabled</dt>
+    <dd>{{ "Yes" if notifier.enabled else "No" }}</dd>
+    <dt>Severities</dt>
+    <dd>{{ notifier.severities | join(', ') }}</dd>
+    <dt>Min Interval</dt>
     <dd>{{ notifier.min_interval_seconds }}s</dd>
     {% if notifier.method %}
     <dt>Method</dt>
@@ -40,6 +65,16 @@
     {% if notifier.headers %}
     <dt>Headers</dt>
     <dd>{{ notifier.headers }}</dd>
+    {% endif %}
+    {% else %}
+    <dt>URL</dt>
+    <dd><code>{{ notifier.url }}</code></dd>
+    <dt>Enabled</dt>
+    <dd>{{ "Yes" if notifier.enabled else "No" }}</dd>
+    <dt>Severities</dt>
+    <dd>{{ notifier.severities | join(', ') }}</dd>
+    <dt>Min Interval</dt>
+    <dd>{{ notifier.min_interval_seconds }}s</dd>
     {% endif %}
   </dl>
 </article>

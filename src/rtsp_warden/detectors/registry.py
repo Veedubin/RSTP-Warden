@@ -13,7 +13,7 @@ from .roi import ROI, Mask
 
 logger = logging.getLogger(__name__)
 
-DetectorType = Literal["motion", "person", "vehicle", "custom"]
+DetectorType = Literal["motion", "person", "vehicle", "dnn", "custom"]
 
 
 class DetectorSpec(BaseModel):
@@ -92,6 +92,31 @@ def build_detector(spec: DetectorSpec, camera_name: str) -> Detector:
         except ImportError:
             logger.warning(
                 "VehicleDetector not yet implemented for %s, using NullDetector", camera_name
+            )
+            return NullDetector()
+
+    if spec.type == "dnn":
+        try:
+            from .builtin.dnn import DNNDetector
+
+            config = spec.config or {}
+            allowed_classes = config.get("classes", None)
+            if allowed_classes is not None:
+                allowed_classes = list(allowed_classes)
+
+            return DNNDetector(
+                model_path=config.get("model_path", None),
+                config_path=config.get("config_path", None),
+                names_path=config.get("names_path", None),
+                confidence=float(config.get("confidence_threshold", 0.5)),
+                nms_threshold=float(config.get("nms_threshold", 0.4)),
+                allowed_classes=allowed_classes,
+                input_width=int(config.get("input_width", 416)),
+                input_height=int(config.get("input_height", 416)),
+            )
+        except ImportError:
+            logger.warning(
+                "DNNDetector not yet implemented for %s, using NullDetector", camera_name
             )
             return NullDetector()
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import func as sa_func
 
 from .engine import get_engine, get_session
-from .models import Camera, Event, User
+from .models import Camera, Clip, Event, User
 
 log = logging.getLogger(__name__)
 
@@ -338,3 +338,90 @@ def get_latest_event_for_camera(camera_name: str, since_seconds: int = 0) -> Eve
                 _ = event.camera  # noqa: F841
             session.expunge(event)
         return event
+
+
+# ---------------------------------------------------------------------------
+# Clip CRUD
+# ---------------------------------------------------------------------------
+
+
+def create_clip(
+    event_id: int,
+    camera_id: int | None,
+    recording_id: str,
+    path: str,
+    duration_seconds: float = 0.0,
+    size_bytes: int = 0,
+    status: str = "pending",
+    error_message: str | None = None,
+) -> Clip:
+    """Create a new Clip row. Returns the created Clip."""
+    from .engine import get_session
+
+    with get_session() as session:
+        clip = Clip(
+            event_id=event_id,
+            camera_id=camera_id,
+            recording_id=recording_id,
+            path=path,
+            duration_seconds=duration_seconds,
+            size_bytes=size_bytes,
+            status=status,
+            error_message=error_message,
+        )
+        session.add(clip)
+        session.commit()
+        session.refresh(clip)
+        session.expunge(clip)
+        return clip
+
+
+def get_clip(clip_id: int) -> Clip | None:
+    """Fetch a single Clip by primary key. Returns None if not found."""
+    from .engine import get_session
+
+    with get_session() as session:
+        clip = session.query(Clip).filter(Clip.id == clip_id).first()
+        if clip is not None:
+            if clip.event_id is not None:
+                _ = clip.event  # noqa: F841
+            if clip.camera_id is not None:
+                _ = clip.camera  # noqa: F841
+            session.expunge(clip)
+        return clip
+
+
+def list_clips_for_event(event_id: int) -> list[Clip]:
+    """Return all clips for a given event, ordered by created_at desc."""
+    from .engine import get_session
+
+    with get_session() as session:
+        clips = (
+            session.query(Clip)
+            .filter(Clip.event_id == event_id)
+            .order_by(Clip.created_at.desc())
+            .all()
+        )
+        for c in clips:
+            session.expunge(c)
+        return clips
+
+
+def update_clip_status(clip_id: int, status: str, error_message: str | None = None) -> Clip | None:
+    """Update a clip's status and optionally its error_message.
+
+    Returns the updated Clip or None if clip_id not found.
+    """
+    from .engine import get_session
+
+    with get_session() as session:
+        clip = session.query(Clip).filter(Clip.id == clip_id).first()
+        if clip is None:
+            return None
+        clip.status = status
+        if error_message is not None:
+            clip.error_message = error_message
+        session.commit()
+        session.refresh(clip)
+        session.expunge(clip)
+        return clip

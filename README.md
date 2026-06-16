@@ -1,4 +1,5 @@
-# rtsp-warden
+# rtsp-warden v1.1.0
+
 
 `rtsp-warden` is a self-hosted Network Video Recorder (NVR). It pulls RTSP camera streams, records them to disk in time-chunked segments, and provides a web UI for live viewing, playback, and administration.
 
@@ -45,7 +46,7 @@ The full **web UI** is now shipped. A FastAPI app runs in a daemon thread inside
 
 CLI: `rtsp-warden run` is now deprecated in favor of `rtsp-warden serve` (alias still works). The standalone health server is gone — `/healthz`, `/status.json`, `/metrics` are served on the web UI's port (default 8080).
 
-**170 tests pass**, 0 lint errors in new code.
+**528 tests pass**, 0 lint errors in new code.
 
 ## Quick start
 
@@ -94,6 +95,7 @@ Open **http://127.0.0.1:8080/** and log in with the admin password printed durin
 | `GET /recordings/{id}` | user | Recording detail with HLS player |
 | `GET /events` | user | Event list with filter |
 | `GET /events/{id}` | user | Event detail |
+| `POST /events/{event_id}/clip` | user | Generate MP4 clip for event |
 | `GET /users` | admin | User list |
 | `GET /users/new` | admin | New user form |
 | `POST /users/new` | admin | Create user |
@@ -110,6 +112,14 @@ Open **http://127.0.0.1:8080/** and log in with the admin password printed durin
 | `GET /health` | none | Full health status (JSON or HTML) |
 | `GET /status.json` | none | Full status JSON |
 | `GET /metrics` | none | Prometheus metrics |
+| `GET /onvif/events` | admin | List ONVIF event subscriptions |
+| `POST /onvif/cameras/{name}/events/subscribe` | admin | Subscribe to ONVIF event |
+| `POST /onvif/cameras/{name}/events/unsubscribe` | admin | Unsubscribe from ONVIF event |
+| `POST /onvif/cameras/{name}/ptz/goto` | user | Move camera to PTZ position |
+| `POST /onvif/cameras/{name}/ptz/save` | admin | Save current PTZ position as preset |
+| `POST /onvif/cameras/{name}/ptz/{preset_name}/delete` | admin | Delete PTZ preset |
+| `GET /clips/{clip_id}` | user | Clip detail page |
+| `GET /clips/{clip_id}/download` | user | Download MP4 clip |
 
 ## Environment variables
 
@@ -254,6 +264,33 @@ The detector framework runs real-time analysis on camera frames. Detectors are c
 | `person` | Haar cascade person detection | `min_confidence`, `scale_factor`, `min_neighbors` |
 | `vehicle` | Vehicle detection | `min_confidence` |
 | `custom` | User-supplied detector via `import_path` | `import_path`, `config` |
+| `dnn` | Deep Neural Network (YOLO/COCO) detection | `model`, `confidence`, `nms_threshold`, `classes` |
+
+### Advanced detection (YOLO/DNN)
+
+Deep learning detectors replace traditional Haar cascades for significantly higher accuracy in vehicle, animal, and person detection. The `dnn` detector uses OpenCV's DNN module to run pre-trained models.
+
+By default, `rtsp-warden` bundles the `yolov4-tiny` configuration and COCO class names. Weights are automatically downloaded to `~/.cache/rtsp-warden/models/` upon first use to keep the installation package lightweight. It can detect 80 standard COCO classes (e.g., car, truck, dog, cat, person).
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: front_door
+    detectors:
+      - type: dnn
+        model: yolov4-tiny
+        confidence: 0.5
+        nms_threshold: 0.4
+        classes: [car, truck, dog, cat]  # Set to null or omit for all 80 classes
+```
+
+**Usage Notes:**
+- Use `dnn` detectors when accuracy is more important than CPU overhead.
+- Use the `classes` list to filter for specific objects (e.g., only notify if a `dog` is detected).
+
+**Limitations:**
+- Requires a modern CPU with AVX/AVX2 support for acceptable performance.
+- Initial startup is slightly delayed on the first run due to weight downloads.
 
 ### CLI flags
 
@@ -384,6 +421,33 @@ alerts:
 
 Manage notifiers at `/alerts` (admin). The web UI lets you test notifiers, view status, and (with `alerts.yaml` companion file) add/remove notifiers without restarting.
 
+### Email and other channels (apprise)
+
+The `apprise` notifier allows `rtsp-warden` to send alerts to over 90 different services, including Email (SMTP), Discord, Telegram, Slack, and Pushover, using a unified URL-based configuration.
+
+Apprise notifications are wrapped in asynchronous threads to ensure that network latency during alert delivery does not block the main event loop or interfere with video ingest.
+
+**Configuration Example:**
+```yaml
+alerts:
+  notifiers:
+    - name: Main Email
+      type: apprise
+      urls: ["mailto://user:pass@smtp.gmail.com:587"]
+      min_interval_seconds: 60
+    - name: Team Chat
+      type: apprise
+      urls: ["tgram://bottoken/ChatID"]
+      min_interval_seconds: 30
+```
+
+**Usage Notes:**
+- Use `apprise` for any notification channel not natively supported by the ntfy or webhook notifiers.
+- You can provide multiple URLs per notifier to send a single event to multiple services simultaneously.
+
+**Limitations:**
+- Complex authentication (like OAuth2) for certain services may require the use of Apprise-specific tokens or API keys within the URL.
+
 ## Recording modes
 
 By default, recording is **continuous** (24/7 chunked segments). Switch a camera to **event** mode to record only around detector events:
@@ -401,6 +465,31 @@ cameras:
 ```
 
 When in event mode, the recorder polls the database every second and starts ffmpeg when an event is detected. The pre_seconds buffer is aspirational (segments always start at "now"); use post_seconds to control how long to keep recording after the last event.
+
+### Generating clips from detections
+
+`rtsp-warden` can now generate standalone MP4 clips that span a specific detection event. Unlike full recordings, clips are extracted using FFmpeg's `copy` codec for high-speed generation without re-encoding.
+
+Clips are stored in a dedicated directory and are accessible via a new web UI detail page.
+
+**Configuration Example:**
+```yaml
+clips:
+  enabled: true
+  pre_seconds: 10.0
+  post_seconds: 10.0
+  output_dir: "/var/lib/rtsp-warden/clips"
+  max_duration: 120.0
+```
+
+**Usage Notes:**
+- Clips are ideal for sharing specific events via email or chat without sending a full recording archive.
+- The `pre_seconds` and `post_seconds` define the window around the event trigger.
+
+**Limitations:**
+- Clip extraction requires that the corresponding recording segments are still available on disk.
+- High-frequency events may result in overlapping clips.
+
 
 ## Audio
 
@@ -429,6 +518,60 @@ onvif:
 Then visit `/onvif` (admin) to discover cameras on the local network. The discovery probe is a WS-Discovery UDP multicast to `239.255.255.250:3702`. PTZ controls are available on the same page (left/right/up/down/zoom/stop).
 
 For Docker deployments, ONVIF discovery requires `network_mode: host` (UDP multicast doesn't work across bridge networks).
+
+### ONVIF events subscription
+
+`rtsp-warden` can now subscribe to native ONVIF events via WS-BaseNotification. Instead of relying solely on visual detectors, the system can trigger alerts based on internal camera events such as Motion Alarms, Imaging Alarms (tampering), or Rule Engine analytics.
+
+These events are integrated directly into the `AlertManager` and can trigger any configured notifier.
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: front_door
+    onvif:
+      host: 192.168.1.100
+      port: 80
+      username: admin
+      password: changeme
+    events:
+      - type: motion
+        min_interval_seconds: 30
+      - type: tamper
+        min_interval_seconds: 60
+```
+
+**Usage Notes:**
+- Use this for "instant" triggers that cameras provide internally, which are often faster and more reliable than software-based motion detection.
+
+**Limitations:**
+- Support varies by camera vendor; not all ONVIF-compliant cameras implement the `VideoSource/MotionAlarm` or `RuleEngine` topics.
+
+### PTZ presets
+
+Named PTZ presets allow you to save and recall specific pan, tilt, and zoom positions for each camera. Presets are persisted in the `config.yaml` file, allowing for consistent positioning across restarts.
+
+**Configuration Example:**
+```yaml
+cameras:
+  - name: front_door
+    presets:
+      - name: front_gate
+        pan: 0.0
+        tilt: 0.0
+        zoom: 0.5
+      - name: driveway
+        pan: -0.5
+        tilt: 0.1
+        zoom: 0.3
+```
+
+**Usage Notes:**
+- Use presets to quickly switch between high-traffic areas of a property.
+- Presets can be managed via the web UI or API.
+
+**Limitations:**
+- PTZ precision depends on the camera hardware's supported coordinate system.
 
 ## Docker
 

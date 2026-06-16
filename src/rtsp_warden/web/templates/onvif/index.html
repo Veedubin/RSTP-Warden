@@ -21,20 +21,190 @@
   </footer>
 </article>
 
-<article>
+<!-- PTZ_PRESETS_START -->
+<article x-data="ptzApp()">
   <header>PTZ Control</header>
-  <p>PTZ is {{ "enabled" if cfg.onvif.ptz_enabled else "disabled" }} globally. For per-camera control, edit config.yaml.</p>
-  <div class="ptz-pad">
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"up"}'>Up</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"down"}'>Down</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"left"}'>Left</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"right"}'>Right</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"zoom_in"}'>Zoom In</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"zoom_out"}'>Zoom Out</button>
-    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"stop"}'>Stop</button>
+  <p>PTZ is {{ "enabled" if cfg.onvif.ptz_enabled else "disabled" }} globally.</p>
+
+  <!-- Camera selector -->
+  <div class="field">
+    <label for="ptz-camera-select">Camera</label>
+    <select id="ptz-camera-select" x-model="camera" @change="fetchPresets()">
+      <option value="">-- Select camera --</option>
+      {% for cam in cfg.cameras %}
+      <option value="{{ cam.name }}">{{ cam.name }}</option>
+      {% endfor %}
+    </select>
   </div>
+
+  <!-- PTZ pad (shown when camera selected) -->
+  <div x-show="camera" class="ptz-pad">
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"up"}'>Up</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"down"}'>Down</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"left"}'>Left</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"right"}'>Right</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"zoom_in"}'>Zoom In</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"zoom_out"}'>Zoom Out</button>
+    <button hx-post="/onvif/cameras/front_door/ptz"
+            :hx-post="'/onvif/cameras/' + camera + '/ptz'"
+            hx-vals='{"action":"stop"}'>Stop</button>
+  </div>
+
+  <!-- Presets (shown when camera selected) -->
+  <div x-show="camera">
+    <h3>Presets</h3>
+    <table x-show="presets.length > 0">
+      <thead>
+        <tr><th>Name</th><th>Pan</th><th>Tilt</th><th>Zoom</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="p in presets" :key="p.name">
+          <tr>
+            <td x-text="p.name"></td>
+            <td x-text="p.pan.toFixed(2)"></td>
+            <td x-text="p.tilt.toFixed(2)"></td>
+            <td x-text="p.zoom.toFixed(2)"></td>
+            <td>
+              <button :hx-post="'/onvif/cameras/' + camera + '/ptz/goto'"
+                      hx-post="/onvif/cameras/placeholder/ptz/goto"
+                      hx-vals='{"preset_name": p.name}'
+                      hx-swap="none"
+                      hx-target="closest tr">Go</button>
+              <button :hx-post="'/onvif/cameras/' + camera + '/ptz/' + p.name + '/delete'"
+                      hx-post="/onvif/cameras/placeholder/ptz/preset/delete"
+                      hx-confirm="Delete preset?"
+                      hx-swap="none"
+                      hx-target="closest tr">Delete</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <p x-show="presets.length === 0"><small>No presets saved for this camera.</small></p>
+
+    <!-- Save new preset form -->
+    <details>
+      <summary>Save current position as preset</summary>
+      <form :hx-post="'/onvif/cameras/' + camera + '/ptz/save'"
+            hx-post="/onvif/cameras/placeholder/ptz/save"
+            hx-swap="none">
+        <div class="field">
+          <label for="preset-name">Preset name</label>
+          <input id="preset-name" name="name" type="text" placeholder="e.g. front_gate" required maxlength="64">
+        </div>
+        <div class="grid">
+          <div class="field">
+            <label for="preset-pan">Pan</label>
+            <input id="preset-pan" name="pan" type="number" step="0.01" min="-1" max="1" value="0">
+          </div>
+          <div class="field">
+            <label for="preset-tilt">Tilt</label>
+            <input id="preset-tilt" name="tilt" type="number" step="0.01" min="-1" max="1" value="0">
+          </div>
+          <div class="field">
+            <label for="preset-zoom">Zoom</label>
+            <input id="preset-zoom" name="zoom" type="number" step="0.01" min="0" max="1" value="0">
+          </div>
+        </div>
+        <button type="submit">Save Preset</button>
+      </form>
+    </details>
+  </div>
+
   <footer>
-    <small>Note: PTZ is a hard-coded test camera. Per-camera PTZ wiring is a future feature.</small>
+    <small>Select a camera to control its PTZ and manage presets. Preset positions are saved in config.yaml.</small>
   </footer>
 </article>
+<script>
+function ptzApp() {
+  return {
+    camera: '',
+    presets: [],
+    async fetchPresets() {
+      if (!this.camera) { this.presets = []; return; }
+      try {
+        const resp = await fetch('/onvif/cameras/' + this.camera + '/presets');
+        const data = await resp.json();
+        this.presets = data.presets || [];
+      } catch(e) { this.presets = []; }
+    }
+  };
+}
+</script>
+<!-- PTZ_PRESETS_END -->
+
+<!-- EVENTS_STATUS_START -->
+<article x-data="eventSubs()" x-init="fetchSubscriptions()">
+  <header>Event Subscription</header>
+  <p>Events are {{ "enabled" if cfg.onvif.events_enabled else "disabled" }} globally.
+     Poll interval: {{ cfg.onvif.events_poll_interval_seconds }}s</p>
+  <table>
+    <thead>
+      <tr><th>Camera</th><th>Status</th><th>Subscription</th><th>Last Event</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      <template x-for="sub in subscriptions" :key="sub.camera_name">
+        <tr>
+          <td x-text="sub.camera_name"></td>
+          <td x-text="sub.is_running ? 'running' : 'stopped'"></td>
+          <td x-text="sub.subscription_ref || '-'"></td>
+          <td x-text="sub.last_event_time || '-'"></td>
+          <td>
+            <button x-show="sub.is_running"
+                    hx-post="/onvif/cameras/" + sub.camera_name + "/events/unsubscribe"
+                    hx-target="closest tr" hx-swap="outerHTML">
+              Unsubscribe
+            </button>
+          </td>
+        </tr>
+      </template>
+    </tbody>
+  </table>
+  <div>
+    <label for="event-camera-select">Subscribe camera:</label>
+    <select id="event-camera-select" x-model="selectedCamera">
+      <option value="">-- Select camera --</option>
+      {% for cam in cfg.cameras %}
+      <option value="{{ cam.name }}">{{ cam.name }}</option>
+      {% endfor %}
+    </select>
+    <button x-show="selectedCamera"
+            :hx-post="'/onvif/cameras/' + selectedCamera + '/events/subscribe'"
+            hx-target="#event-sub-result" hx-swap="innerHTML">
+      Subscribe
+    </button>
+    <div id="event-sub-result"></div>
+  </div>
+  <footer>
+    <small>ONVIF events (motion, tampering) are polled and routed into the alert system. PullPoint subscription requires camera support.</small>
+  </footer>
+</article>
+<script>
+function eventSubs() {
+  return {
+    subscriptions: [],
+    selectedCamera: '',
+    async fetchSubscriptions() {
+      try {
+        const resp = await fetch('/onvif/events');
+        const data = await resp.json();
+        this.subscriptions = data.subscriptions || [];
+      } catch(e) { this.subscriptions = []; }
+    }
+  };
+}
+</script>
+<!-- EVENTS_STATUS_END -->
 {% endblock %}

@@ -14,6 +14,8 @@ Available detectors:
   (``builtin.person.PersonDetector``)
 - ``vehicle`` -- Haar cascade car detector
   (``builtin.vehicle.VehicleDetector``)
+- ``dnn`` -- YOLOv4-tiny DNN detector for vehicles and animals
+  (``builtin.dnn.DNNDetector``)
 - ``custom`` -- Template/demo custom detector
   (``builtin.custom.DemoCustomDetector``)
 """

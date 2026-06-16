@@ -13,8 +13,14 @@
     <span class="notifier-type notifier-{{ n.type }}">{{ n.type }}</span>
     {% if not n.enabled %}<span class="disabled">disabled</span>{% endif %}
   </header>
+  {% if n.type == "apprise" %}
+  <p>URLs: {% for url in n.urls %}<code>{{ url }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  {% if n.title_template %}<p>Title template: <code>{{ n.title_template }}</code></p>{% endif %}
+  <p>Min severity: {{ n.min_severity }} | Min interval: {{ n.min_interval_seconds }}s</p>
+  {% else %}
   <p>URL: <code>{{ n.url }}</code></p>
   <p>Severities: {{ n.severities | join(', ') }} | Min interval: {{ n.min_interval_seconds }}s</p>
+  {% endif %}
   <footer>
     <button hx-post="/alerts/{{ n.name|urlencode }}/test" hx-swap="outerHTML">Send test</button>
     <a href="/alerts/{{ n.name|urlencode }}/edit">Edit</a>
