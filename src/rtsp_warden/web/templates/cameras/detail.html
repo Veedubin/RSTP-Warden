@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Camera: {{ camera.name }}{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>{{ camera.name }}</h1>
+  <p>Camera detail</p>
+</hgroup>
+
+{# Live MJPEG embed #}
+{% if mjpeg_url %}
+<article>
+  <header>Live preview</header>
+  <div class="mjpeg-container">
+    <img src="{{ mjpeg_url }}" alt="Live MJPEG stream for {{ camera.name }}"
+         onerror="this.alt='Stream unavailable'; this.style.background='#f0f0f0';">
+  </div>
+  <footer>
+    <small>
+      MJPEG stream at <code>{{ mjpeg_url }}</code>
+      {% if snapshot_url %}
+      &middot; <a href="{{ snapshot_url }}" target="_blank">Snapshot</a>
+      {% endif %}
+    </small>
+  </footer>
+</article>
+{% elif camera.has_proxy and camera.proxy_mode != 'mjpeg' %}
+<article>
+  <header>Proxy</header>
+  <p>Proxy is enabled in <strong>{{ camera.proxy_mode }}</strong> mode on port {{ camera.proxy_port }}.</p>
+</article>
+{% else %}
+<article>
+  <header>No live preview</header>
+  <p>Proxy is not enabled for this camera.</p>
+</article>
+{% endif %}
+
+{# Camera config summary #}
+<article>
+  <header>Configuration</header>
+  <table>
+    <tbody>
+      <tr><td>Recording</td><td>{{ 'Enabled' if camera.record_enabled else 'Disabled' }}</td></tr>
+      <tr><td>Proxy</td><td>{{ 'Enabled' if camera.has_proxy else 'Disabled' }}{% if camera.has_proxy %} ({{ camera.proxy_mode }}, port {{ camera.proxy_port }}){% endif %}</td></tr>
+      <tr><td>Main URL</td><td><code>{{ camera.main_url_redacted }}</code></td></tr>
+      <tr><td>Sub URL</td><td><code>{{ camera.sub_url_redacted }}</code></td></tr>
+      <tr><td>Status</td><td>{{ camera.status }}</td></tr>
+    </tbody>
+  </table>
+</article>
+
+{# Detectors #}
+<article hx-get="/cameras/{{ camera.name }}/detectors"
+         hx-trigger="load, every 10s"
+         hx-swap="innerHTML">
+  <p>Loading detectors...</p>
+</article>
+
+{# Recent recordings #}
+<h2>Recent recordings</h2>
+{% if recent_recordings %}
+<table>
+  <thead>
+    <tr><th>Time</th><th>Stream</th><th>Size</th><th>Container</th></tr>
+  </thead>
+  <tbody>
+    {% for rec in recent_recordings %}
+    <tr>
+      <td>{{ rec.start_time.strftime('%Y-%m-%d %H:%M') if rec.start_time else '-' }}</td>
+      <td>{{ rec.stream }}</td>
+      <td>{{ rec.size_bytes }}</td>
+      <td>{{ rec.container }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><small>No recordings for this camera.</small></p>
+{% endif %}
+
+<p><a href="/cameras">&larr; Back to cameras</a></p>
+{% endblock %}

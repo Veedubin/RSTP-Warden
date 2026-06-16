@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Event {{ event.id }}{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Event {{ event.id }}</h1>
+  <p>{{ event.event_type }} &middot; {{ event.camera_name }}</p>
+</hgroup>
+
+<article>
+  <header>Details</header>
+  <table>
+    <tbody>
+      <tr><td>ID</td><td>{{ event.id }}</td></tr>
+      <tr><td>Camera</td><td>{{ event.camera_name }}</td></tr>
+      <tr><td>Type</td><td>{{ event.event_type }}</td></tr>
+      <tr><td>Severity</td><td><span class="severity-{{ event.severity }}">{{ event.severity }}</span></td></tr>
+      <tr><td>Message</td><td>{{ event.message or '-' }}</td></tr>
+      <tr><td>Time</td><td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '-' }}</td></tr>
+    </tbody>
+  </table>
+</article>
+
+{% if event.metadata_json and event.metadata_json != '{}' %}
+<article>
+  <header>Metadata</header>
+  <pre><code>{{ event.metadata_json }}</code></pre>
+</article>
+{% endif %}
+
+<p><a href="/events">&larr; Back to events</a></p>
+{% endblock %}

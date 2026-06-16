@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Health{% endblock %}
+
+{% block content %}
+<h1>System Health</h1>
+
+<article>
+  <header>Status</header>
+  <div id="health-status"
+       hx-get="/health/partial"
+       hx-trigger="every 10s"
+       hx-swap="innerHTML">
+    {% include "partials/health_status.html" %}
+  </div>
+</article>
+{% endblock %}

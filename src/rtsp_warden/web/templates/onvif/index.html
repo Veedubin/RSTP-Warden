@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}ONVIF{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>ONVIF Discovery &amp; PTZ</h1>
+  <p>Status: {{ "enabled" if cfg.onvif.discovery_enabled else "disabled" }}</p>
+</hgroup>
+
+<article>
+  <header>Discover cameras on local network</header>
+  <button id="discover-btn"
+          hx-post="/onvif/discover"
+          hx-trigger="click"
+          hx-target="#discover-results"
+          hx-swap="innerHTML">
+    Discover
+  </button>
+  <div id="discover-results"></div>
+  <footer>
+    <small>Sends a WS-Discovery probe to 239.255.255.250:3702 and waits up to {{ cfg.onvif.discovery_timeout_seconds }}s for responses.</small>
+  </footer>
+</article>
+
+<article>
+  <header>PTZ Control</header>
+  <p>PTZ is {{ "enabled" if cfg.onvif.ptz_enabled else "disabled" }} globally. For per-camera control, edit config.yaml.</p>
+  <div class="ptz-pad">
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"up"}'>Up</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"down"}'>Down</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"left"}'>Left</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"right"}'>Right</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"zoom_in"}'>Zoom In</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"zoom_out"}'>Zoom Out</button>
+    <button hx-post="/onvif/cameras/front_door/ptz" hx-vals='{"action":"stop"}'>Stop</button>
+  </div>
+  <footer>
+    <small>Note: PTZ is a hard-coded test camera. Per-camera PTZ wiring is a future feature.</small>
+  </footer>
+</article>
+{% endblock %}

@@ -1,0 +1,57 @@
+cameras:
+  - name: front
+    main_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/101
+    sub_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/102
+
+    record:
+      enabled: true
+      output_dir: ./recordings
+
+      # Main stream: TS container (NVR-grade default)
+      main:
+        enabled: true
+        container: ts
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      # Sub stream: TS is the NVR-grade default for both streams
+      sub:
+        enabled: true
+        container: ts
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      retention:
+        max_days: 7
+        max_gb: 50
+        keep_last_n: 10
+        cleanup_interval_seconds: 300
+
+    proxy:
+      enabled: true
+      mode: mjpeg         # mjpeg | rtsp
+      stream: sub         # main | sub
+      bind_host: 0.0.0.0
+      port: 9001
+
+      # RTSP (MediaMTX) options (mode=rtsp)
+      path: live
+      source_on_demand: true  # NOTE: currently best-effort; unified ingest publishes while running.
+
+      # MJPEG options (mode=mjpeg)
+      fps: 7
+      scale_width: 0      # 0 disables scaling
+
+runtime:
+  ffmpeg_path: ffmpeg
+  mediamtx_path: mediamtx
+  ffmpeg_loglevel: warning
+  workspace_dir: ./workspace
+
+  auto_restart: true
+  restart_backoff_min_s: 1
+  restart_backoff_max_s: 60
+  restart_backoff_factor: 2
+
+  stderr_tail_lines: 200
+  status_interval_s: 15

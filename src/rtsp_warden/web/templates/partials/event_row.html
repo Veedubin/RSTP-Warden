@@ -1,0 +1,9 @@
+{% for evt in events %}
+<tr>
+  <td><a href="/events/{{ evt.id }}">{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</a></td>
+  <td>{{ evt.camera_name }}</td>
+  <td>{{ evt.event_type }}</td>
+  <td><span class="severity-{{ evt.severity }}">{{ evt.severity }}</span></td>
+  <td>{{ evt.message[:80] if evt.message else '-' }}</td>
+</tr>
+{% endfor %}

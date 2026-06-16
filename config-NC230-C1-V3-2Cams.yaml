@@ -1,0 +1,100 @@
+cameras:
+  - name: front
+    main_url: "rtsp://admin:@192.168.1.160:554/videoMain"
+    sub_url: "rtsp://admin:@192.168.1.160:554/videoSub"
+
+    record:
+      enabled: true
+      output_dir: ./recordings
+
+      # Main stream: prefer MKV container for resilience (remux / copy; no re-encode).
+      main:
+        enabled: true
+        container: mkv
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      # Sub stream: MP4 is often convenient for general playback tooling.
+      sub:
+        enabled: false
+        container: mp4
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      retention:
+        max_days: 7
+        max_gb: 50
+        keep_last_n: 10
+        cleanup_interval_seconds: 300
+
+    proxy:
+      enabled: true
+      mode: mjpeg         # mjpeg | rtsp
+      stream: main         # main | sub
+      bind_host: 0.0.0.0
+      port: 9002
+
+      # RTSP (MediaMTX) options (mode=rtsp)
+      path: live
+      source_on_demand: true  # NOTE: best-effort; unified ingest publishes while running.
+
+      # MJPEG options (mode=mjpeg)
+      fps: 15
+      scale_width: 0      # 0 disables scaling
+
+  - name: rear
+    main_url: "rtsp://admin:admin@192.168.1.34:554/h264_hd.sdp"
+    sub_url: "rtsp://admin:admin@192.168.1.34:554/h264_vga.sdp"
+
+    record:
+      enabled: true
+      output_dir: ./recordings
+
+      # Main stream: prefer MKV container for resilience (remux / copy; no re-encode).
+      main:
+        enabled: true
+        container: mkv
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      # Sub stream: MP4 is often convenient for general playback tooling.
+      sub:
+        enabled: false
+        container: mp4
+        chunk_seconds: 300
+        rtsp_transport: tcp
+
+      retention:
+        max_days: 7
+        max_gb: 50
+        keep_last_n: 10
+        cleanup_interval_seconds: 300
+
+    proxy:
+      enabled: true
+      mode: mjpeg         # mjpeg | rtsp
+      stream: main         # main | sub
+      bind_host: 0.0.0.0
+      port: 9001
+
+      # RTSP (MediaMTX) options (mode=rtsp)
+      path: live
+      source_on_demand: true  # NOTE: best-effort; unified ingest publishes while running.
+
+      # MJPEG options (mode=mjpeg)
+      fps: 15
+      scale_width: 0      # 0 disables scaling
+
+runtime:
+  ffmpeg_path: ffmpeg
+  mediamtx_path: mediamtx
+  ffmpeg_loglevel: warning
+  workspace_dir: ./workspace
+
+  auto_restart: true
+  restart_backoff_min_s: 1
+  restart_backoff_max_s: 60
+  restart_backoff_factor: 2
+
+  stderr_tail_lines: 200
+  status_interval_s: 15

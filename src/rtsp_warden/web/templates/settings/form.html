@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}System Settings{% endblock %}
+
+{% block content %}
+<article>
+  <h1>System Settings</h1>
+
+  <h2>System Information</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Version</strong></td><td>{{ version }}</td></tr>
+      <tr><td><strong>Auth Enabled</strong></td><td>{{ 'Yes' if auth_enabled else 'No' }}</td></tr>
+      <tr><td><strong>Database</strong></td><td>{{ db_type }}</td></tr>
+      <tr><td><strong>Web Host</strong></td><td>{{ web_host }}</td></tr>
+      <tr><td><strong>Web Port</strong></td><td>{{ web_port }}</td></tr>
+      <tr><td><strong>Cameras</strong></td><td>{{ camera_count }}</td></tr>
+      <tr><td><strong>Users</strong></td><td>{{ user_count }}</td></tr>
+      {% if disk_info %}
+      <tr><td><strong>Recording Disk</strong></td><td>{{ disk_info }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <h2>Environment Variables</h2>
+  <table>
+    <thead>
+      <tr><th>Variable</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      {% for key, value in env_vars.items() %}
+      <tr><td><code>{{ key }}</code></td><td>{{ value }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <mark>
+    System settings are read-only from the web UI. To change configuration,
+    edit the environment variables or config file and restart the server.
+  </mark>
+</article>
+{% endblock %}

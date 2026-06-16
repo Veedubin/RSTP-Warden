@@ -1,0 +1,18 @@
+<article class="camera-card" id="camera-card-{{ camera.name }}"
+         hx-get="/cameras/{{ camera.name }}/status"
+         hx-trigger="every 5s"
+         hx-swap="outerHTML">
+  <header>
+    <a href="/cameras/{{ camera.name }}">{{ camera.name }}</a>
+    <span class="status-dot status-{{ camera.status }}"></span>
+  </header>
+  <div class="camera-card-body">
+    <small>
+      {% if camera.record_enabled %}Recording{% endif %}
+      {% if camera.record_enabled and camera.has_proxy %} + {% endif %}
+      {% if camera.has_proxy %}{{ camera.proxy_mode | upper }} :{{ camera.proxy_port }}{% endif %}
+    </small>
+    <br>
+    <small>{{ camera.main_url_redacted }}</small>
+  </div>
+</article>

@@ -1,0 +1,53 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.mypy_cache/
+.tox/
+
+# Runtime data
+recordings/
+clips/
+*.ts
+*.m3u8
+*.mp4
+!examples/**/*.mp4
+.cache/
+tmp/
+*.pid
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test artifacts
+test_*.db
+test_*.log
+playwright-report/
+test-results/
+
+# Misc
+Archive.zip
+*.bak
+*.tmp

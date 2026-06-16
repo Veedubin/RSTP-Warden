@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Edit Notifier{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Edit Notifier: {{ notifier.name }}</h1>
+  <p>Type: {{ notifier.type }}</p>
+</hgroup>
+
+<article>
+  <header>Note</header>
+  <p>To edit notifiers, modify your <code>config.yaml</code> under the <code>alerts</code> key and restart the server. Current configuration:</p>
+</article>
+
+<article>
+  <dl>
+    <dt>Name</dt>
+    <dd>{{ notifier.name }}</dd>
+    <dt>Type</dt>
+    <dd>{{ notifier.type }}</dd>
+    <dt>URL</dt>
+    <dd><code>{{ notifier.url }}</code></dd>
+    <dt>Enabled</dt>
+    <dd>{{ "Yes" if notifier.enabled else "No" }}</dd>
+    {% if notifier.topic %}
+    <dt>Topic</dt>
+    <dd>{{ notifier.topic }}</dd>
+    {% endif %}
+    {% if notifier.priority %}
+    <dt>Priority</dt>
+    <dd>{{ notifier.priority }}</dd>
+    {% endif %}
+    <dt>Severities</dt>
+    <dd>{{ notifier.severities | join(', ') }}</dd>
+    <dt>Min interval</dt>
+    <dd>{{ notifier.min_interval_seconds }}s</dd>
+    {% if notifier.method %}
+    <dt>Method</dt>
+    <dd>{{ notifier.method }}</dd>
+    {% endif %}
+    {% if notifier.headers %}
+    <dt>Headers</dt>
+    <dd>{{ notifier.headers }}</dd>
+    {% endif %}
+  </dl>
+</article>
+
+<p><a href="/alerts">Back to Alerts</a></p>
+{% endblock %}

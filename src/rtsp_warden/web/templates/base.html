@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <script>
+    if (matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  </script>
+  <title>{% block title %}rtsp-warden{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/pico.min.css">
+  <link rel="stylesheet" href="/static/css/warden.css">
+  <script src="/static/js/htmx.min.js"></script>
+  <script src="/static/js/alpine.min.js" defer></script>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% block nav %}
+  <nav class="container-fluid">
+    <ul>
+      <li><strong><a href="/">rtsp-warden</a></strong></li>
+    </ul>
+    <ul>
+      {% set user = request.state.current_user if request.state.current_user else none %}
+      {% if user %}
+      <li><a href="/cameras">Cameras</a></li>
+      <li><a href="/recordings">Recordings</a></li>
+      <li><a href="/events">Events</a></li>
+      {% if user.role == 'admin' %}
+      <li><a href="/users">Users</a></li>
+      <li><a href="/alerts">Alerts</a></li>
+      <li><a href="/onvif">ONVIF</a></li>
+      <li><a href="/settings">Settings</a></li>
+      {% endif %}
+      <li><a href="/api-tokens">API Tokens</a></li>
+      <li>
+        <details>
+          <summary>{{ user.username }}</summary>
+          <form method="POST" action="/logout"
+                hx-post="/logout"
+                hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <button type="submit" class="secondary outline">Log out</button>
+          </form>
+        </details>
+      </li>
+      {% else %}
+      <li><a href="/login">Log in</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endblock %}
+
+  <main class="container-fluid">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="container-fluid">
+    <small>rtsp-warden v{{ version }}</small>
+  </footer>
+
+  <script src="/static/js/warden.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
