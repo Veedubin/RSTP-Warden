@@ -1,7 +1,15 @@
 services:
   warden:
-    build: .
-    image: rtsp-warden:latest
+    build:
+      context: .
+      # Use the distroless Dockerfile (685 MB vs 1.21 GB).
+      # Set to just "Dockerfile" for the larger Python 3.13-slim image.
+      dockerfile: Dockerfile.distroless
+    image: rtsp-warden:distroless
+    # To use the larger slim image instead, comment out the `build` block above
+    # and uncomment the next two lines:
+    # image: rtsp-warden:latest
+    # build: .
     container_name: rtsp-warden
     restart: unless-stopped
     ports:

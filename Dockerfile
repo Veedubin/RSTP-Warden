@@ -1,3 +1,10 @@
+# rtsp-warden v1.0.0 — Default (slim) image
+# Multi-stage build with python:3.13-slim runtime.
+# For the smaller Distroless variant, see Dockerfile.distroless (685 MB vs 1.21 GB).
+#
+# Build with:      docker build -t rtsp-warden:latest .
+# Build distroless: docker build -f Dockerfile.distroless -t rtsp-warden:distroless .
+
 # syntax=docker/dockerfile:1.6
 
 # ---- Stage 1: builder ----
