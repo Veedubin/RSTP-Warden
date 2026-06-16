@@ -57,6 +57,124 @@
   <p>Loading detectors...</p>
 </article>
 
+{# Retention #}
+<article>
+  <header>Retention</header>
+  <table>
+    <tbody>
+      <tr>
+        <td>Effective policy</td>
+        <td>
+          {{ effective_retention.max_days | default('-', true) }} days,
+          {{ effective_retention.max_gb | default('-', true) }} GB max,
+          keep last {{ effective_retention.keep_last_n }}
+        </td>
+      </tr>
+      <tr>
+        <td>Source</td>
+        <td>
+          {% if has_per_camera_retention %}
+          <mark>Per-camera override</mark>
+          {% else %}
+          Global default
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>Global default</td>
+        <td>
+          {{ global_retention.max_days | default('-', true) }} days,
+          {{ global_retention.max_gb | default('-', true) }} GB max,
+          keep last {{ global_retention.keep_last_n }}
+        </td>
+      </tr>
+      <tr>
+        <td>Cleanup interval</td>
+        <td>{{ effective_retention.cleanup_interval_seconds }}s</td>
+      </tr>
+    </tbody>
+  </table>
+  <details>
+    <summary role="button" class="secondary">Edit retention</summary>
+    <form method="POST" action="/cameras/{{ camera.name }}/retention">
+      <div class="grid">
+        <label for="ret-max-days">
+          Max days
+          <input id="ret-max-days" name="max_days" type="number" min="1"
+                 value="{{ effective_retention.max_days if effective_retention.max_days is not none else '' }}"
+                 placeholder="Unlimited">
+        </label>
+        <label for="ret-max-gb">
+          Max GB
+          <input id="ret-max-gb" name="max_gb" type="number" step="0.1" min="0.1"
+                 value="{{ effective_retention.max_gb if effective_retention.max_gb is not none else '' }}"
+                 placeholder="Unlimited">
+        </label>
+      </div>
+      <div class="grid">
+        <label for="ret-keep-last-n">
+          Keep last N
+          <input id="ret-keep-last-n" name="keep_last_n" type="number" min="0"
+                 value="{{ effective_retention.keep_last_n }}">
+        </label>
+        <label for="ret-cleanup-interval">
+          Cleanup interval (s)
+          <input id="ret-cleanup-interval" name="cleanup_interval_seconds" type="number" min="1"
+                 value="{{ effective_retention.cleanup_interval_seconds }}">
+        </label>
+      </div>
+      <div class="grid">
+        <button type="submit">Save</button>
+        {% if has_per_camera_retention %}
+        <button type="submit" name="action" value="reset" class="secondary"
+                onclick="return confirm('Reset retention to global default?')">
+          Reset to global
+        </button>
+        {% endif %}
+      </div>
+    </form>
+  </details>
+</article>
+
+{# Detection Zones #}
+<article>
+  <header>Detection zones</header>
+  <p>Grid-based detection zones let you block parts of the frame to ignore detections in those areas.</p>
+  <a href="/cameras/{{ camera.name }}/zones" role="button" class="secondary">Edit detection zones</a>
+</article>
+
+{# Sensitivity #}
+<article>
+  <header>Sensitivity</header>
+  <table>
+    <tbody>
+      <tr>
+        <td>Current value</td>
+        <td>{{ sensitivity }} / 100
+          {% if sensitivity >= 70 %} (high)
+          {% elif sensitivity > 30 %} (neutral)
+          {% else %} (low)
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <a href="/cameras/{{ camera.name }}/sensitivity" role="button" class="secondary">Edit sensitivity</a>
+</article>
+
+{# Detection Classes #}
+<article>
+  <header>Detection classes</header>
+  {% if detect_classes is none %}
+  <p>All classes active (no filter)</p>
+  {% elif detect_classes %}
+  <p>{{ detect_classes|length }} class(es) active: {{ detect_classes | join(', ') }}</p>
+  {% else %}
+  <p>0 classes active (no detections will be reported for DNN)</p>
+  {% endif %}
+  <a href="/cameras/{{ camera.name }}/detection-classes" role="button" class="secondary">Edit detection classes</a>
+</article>
+
 {# Recent recordings #}
 <h2>Recent recordings</h2>
 {% if recent_recordings %}

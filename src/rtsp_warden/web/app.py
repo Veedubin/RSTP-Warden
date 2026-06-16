@@ -30,6 +30,7 @@ from .routes.recordings import router as recordings_router
 from .routes.settings import router as settings_router
 from .routes.tokens import router as tokens_router
 from .routes.users import router as users_router
+from .routes.zones import router as zones_router
 from .session import install_security
 
 # Type alias for the callable that provides the live AppRuntime.
@@ -102,5 +103,6 @@ def create_app(
     app.include_router(alerts_router)
     app.include_router(clips_router)
     app.include_router(onvif_router)
+    app.include_router(zones_router)
 
     return app

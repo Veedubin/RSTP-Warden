@@ -1,0 +1,162 @@
+<div x-data="zoneEditor({
+  cameraName: '{{ camera_name }}',
+  zoneName: '{{ zone_name }}',
+  gridCols: {{ grid_cols }},
+  gridRows: {{ grid_rows }},
+  frameWidth: {{ frame_width }},
+  frameHeight: {{ frame_height }},
+  blockedCells: {{ blocked_cells_json | tojson }},
+  snapshotUrl: '{{ snapshot_url }}'
+})">
+  <article>
+    <header>
+      <span x-text="zoneName ? 'Edit zone: ' + zoneName : 'New zone'"></span>
+    </header>
+
+    <div class="grid">
+      <label for="zone-name">
+        Zone name
+        <input id="zone-name" name="zone_name" type="text"
+               x-model="zoneName" required placeholder="e.g. exclude road">
+      </label>
+    </div>
+
+    <div class="grid">
+      <label for="grid-cols">
+        Grid columns
+        <input id="grid-cols" name="grid_cols" type="number" min="2" max="64"
+               x-model.number="gridCols" x-ref="gridColsInput">
+      </label>
+      <label for="grid-rows">
+        Grid rows
+        <input id="grid-rows" name="grid_rows" type="number" min="2" max="64"
+               x-model.number="gridRows" x-ref="gridRowsInput">
+      </label>
+      <label for="frame-width">
+        Frame width
+        <input id="frame-width" name="frame_width" type="number" min="1"
+               x-model.number="frameWidth">
+      </label>
+      <label for="frame-height">
+        Frame height
+        <input id="frame-height" name="frame_height" type="number" min="1"
+               x-model.number="frameHeight">
+      </label>
+    </div>
+
+    {# Grid overlay with snapshot #}
+    <div class="zone-canvas-wrapper" style="position:relative; display:inline-block; max-width:100%;">
+      {# Snapshot image as background #}
+      <template x-if="snapshotUrl">
+        <img :src="snapshotUrl" alt="Camera snapshot"
+             style="display:block; max-width:100%;"
+             @error="snapshotUrl = ''">
+      </template>
+      <template x-if="!snapshotUrl">
+        <div style="background:#222; color:#999; display:flex; align-items:center; justify-content:center;"
+             :style="'width:' + (frameWidth > 800 ? 800 : frameWidth) + 'px; height:' + (frameHeight > 450 ? 450 : frameHeight) + 'px;'">
+          <p>No snapshot available</p>
+        </div>
+      </template>
+
+      {# SVG overlay for the grid #}
+      <svg style="position:absolute; top:0; left:0; width:100%; height:100%;"
+           :viewBox="'0 0 ' + frameWidth + ' ' + frameHeight"
+           @click="handleClick">
+        <template x-for="c in gridCols" :key="'col-' + c">
+          <template x-for="r in gridRows" :key="'cell-' + c + '-' + r">
+            <rect :x="(c - 1) * (frameWidth / gridCols)"
+                  :y="(r - 1) * (frameHeight / gridRows)"
+                  :width="frameWidth / gridCols"
+                  :height="frameHeight / gridRows"
+                  :fill="isBlocked(c - 1, r - 1) ? 'rgba(0,0,0,0.6)' : 'rgba(0,255,0,0.08)'"
+                  stroke="rgba(255,255,255,0.3)"
+                  stroke-width="1"
+                  style="cursor:pointer" />
+          </template>
+        </template>
+      </svg>
+    </div>
+
+    <p>
+      <small>Click a cell to toggle blocked/active. Black cells = blocked (detections ignored). Green cells = active.</small><br>
+      <small>Cells blocked: <strong x-text="blockedCells.length"></strong> / <strong x-text="gridCols * gridRows"></strong></small>
+    </p>
+
+    {# Hidden form fields for blocked cells #}
+    <form hx-post="/cameras/{{ camera_name }}/zones"
+          hx-target="body"
+          x-ref="zoneForm"
+          method="POST">
+      <input type="hidden" name="csrf_token"
+             value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+      <input type="hidden" name="zone_name" x-model="zoneName">
+      <input type="hidden" name="grid_cols" x-model="gridCols">
+      <input type="hidden" name="grid_rows" x-model="gridRows">
+      <input type="hidden" name="frame_width" x-model="frameWidth">
+      <input type="hidden" name="frame_height" x-model="frameHeight">
+      <template x-for="(cell, idx) in blockedCells" :key="'bc-' + idx">
+        <input type="hidden" name="blocked_cell" :value="cell.col + ',' + cell.row">
+      </template>
+      <div class="grid">
+        <button type="submit" class="primary">Save zone</button>
+        <a href="/cameras/{{ camera_name }}/zones" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  </article>
+</div>
+
+<script>
+function zoneEditor(opts) {
+  return {
+    cameraName: opts.cameraName,
+    zoneName: opts.zoneName || '',
+    gridCols: opts.gridCols || 16,
+    gridRows: opts.gridRows || 16,
+    frameWidth: opts.frameWidth || 1920,
+    frameHeight: opts.frameHeight || 1080,
+    snapshotUrl: opts.snapshotUrl || '',
+    blockedCells: (opts.blockedCells || []).map(function(c) {
+      return { col: c.col, row: c.row };
+    }),
+
+    isBlocked(col, row) {
+      return this.blockedCells.some(function(c) {
+        return c.col === col && c.row === row;
+      });
+    },
+
+    toggleCell(col, row) {
+      var idx = -1;
+      for (var i = 0; i < this.blockedCells.length; i++) {
+        if (this.blockedCells[i].col === col && this.blockedCells[i].row === row) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        this.blockedCells.splice(idx, 1);
+      } else {
+        this.blockedCells.push({ col: col, row: row });
+      }
+    },
+
+    handleClick(event) {
+      var svg = event.currentTarget;
+      var rect = svg.getBoundingClientRect();
+      var x = event.clientX - rect.left;
+      var y = event.clientY - rect.top;
+      // Scale from screen coords to viewBox coords
+      var scaleX = this.frameWidth / rect.width;
+      var scaleY = this.frameHeight / rect.height;
+      var vx = x * scaleX;
+      var vy = y * scaleY;
+      var col = Math.floor(vx / (this.frameWidth / this.gridCols));
+      var row = Math.floor(vy / (this.frameHeight / this.gridRows));
+      col = Math.max(0, Math.min(this.gridCols - 1, col));
+      row = Math.max(0, Math.min(this.gridRows - 1, row));
+      this.toggleCell(col, row);
+    }
+  };
+}
+</script>

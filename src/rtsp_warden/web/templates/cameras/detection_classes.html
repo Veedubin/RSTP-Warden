@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Detection classes: {{ camera_name }}{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Detection classes for {{ camera_name }}</h1>
+  <p>{{ active_classes|length }} of {{ all_classes|length }} classes active</p>
+</hgroup>
+
+<article>
+  <header>Active classes</header>
+  <p>Only checked classes trigger detection events on this camera.</p>
+
+  <form method="POST" action="/cameras/{{ camera_name }}/detection-classes">
+    <input type="hidden" name="csrf_token"
+           value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+
+    {% for category_name, classes in class_groups %}
+    <details {% if category_name == "person" or category_name == "vehicle" %}open{% endif %}>
+      <summary role="button" class="secondary outline">{{ category_name | capitalize }}</summary>
+      <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));">
+        {% for cls_name in classes %}
+        <label>
+          <input type="checkbox" name="class_{{ cls_name }}"
+                 {% if cls_name in active_classes_set %}checked{% endif %}
+                 value="on">
+          {{ cls_name }}
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+
+    <div class="grid" style="margin-top: 1rem;">
+      <button type="submit">Save</button>
+      <a href="/cameras/{{ camera_name }}" role="button" class="secondary">Cancel</a>
+      <button type="submit" name="action" value="save_and_reload" class="contrast">Save + Reload Detectors</button>
+    </div>
+  </form>
+</article>
+
+<article>
+  <header>Select all / Clear all</header>
+  <div class="grid">
+    <script>
+      function selectAll() {
+        document.querySelectorAll('input[type="checkbox"][name^="class_"]').forEach(function(cb) { cb.checked = true; });
+      }
+      function clearAll() {
+        document.querySelectorAll('input[type="checkbox"][name^="class_"]').forEach(function(cb) { cb.checked = false; });
+      }
+    </script>
+    <button type="button" onclick="selectAll()" class="secondary">Select all</button>
+    <button type="button" onclick="clearAll()" class="secondary">Clear all</button>
+  </div>
+</article>
+
+<p><a href="/cameras/{{ camera_name }}">&larr; Back to camera</a></p>
+{% endblock %}

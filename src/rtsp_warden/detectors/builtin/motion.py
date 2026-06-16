@@ -70,6 +70,7 @@ class MotionDetector:
 
     min_area: int = 500
     sensitivity: float = 0.5
+    var_threshold: int | None = None  # Override computed varThreshold when set
     name: str = "motion"
     kind: str = "motion"
     _subtractor: cv2.BackgroundSubtractor | None = None
@@ -81,8 +82,16 @@ class MotionDetector:
 
         Must be called once before :meth:`process`.  Keeps the heavy
         OpenCV allocation out of import-time.
+
+        If ``var_threshold`` is set (not None), it overrides the value
+        computed from ``sensitivity``.  This allows camera-level sensitivity
+        scaling to specify an exact varThreshold.
         """
-        var_threshold = _sensitivity_to_var_threshold(self.sensitivity)
+        var_threshold = (
+            self.var_threshold
+            if self.var_threshold is not None
+            else _sensitivity_to_var_threshold(self.sensitivity)
+        )
         self._subtractor = cv2.createBackgroundSubtractorMOG2(
             history=200,
             varThreshold=var_threshold,

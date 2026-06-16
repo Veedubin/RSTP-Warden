@@ -29,7 +29,7 @@ class Timeline {
 
     /** @type {{start: number, end: number, path: string, size: number}[]} */
     this.segments = [];
-    /** @type {{id: number, type: string, severity: string, ts: number}[]} */
+    /** @type {{id: number, type: string, severity: string, ts: number, object_type: string, color: string, label: string}[]} */
     this.events = [];
     /** @type {number} */
     this.timelineStart = 0;
@@ -110,21 +110,19 @@ class Timeline {
       ctx.fillRect(x1, 8, Math.max(x2 - x1, 1), h - 16);
     }
 
-    // Events.
-    const severityColors = {
-      info: "#2196f3",
-      warn: "#ff9800",
-      error: "#f44336",
-    };
+    // Events -- color by object type, line style by severity.
     for (const evt of this.events) {
       const x = scaleX(evt.ts);
-      ctx.strokeStyle = severityColors[evt.severity] || "#ffffff";
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = evt.color || "#7f8c8d";
+      // Severity as line style: info=dashed, warn=solid, error=thick solid
+      ctx.setLineDash(evt.severity === "info" ? [4, 4] : []);
+      ctx.lineWidth = evt.severity === "error" ? 2.5 : 1.5;
       ctx.beginPath();
       ctx.moveTo(x, 2);
       ctx.lineTo(x, h - 2);
       ctx.stroke();
     }
+    ctx.setLineDash([]);
 
     // Border.
     ctx.strokeStyle = "#555";
@@ -205,7 +203,7 @@ class Timeline {
       }
     }
 
-    // Count events at this time.
+    // Count events at this time and collect details.
     const nearbyEvents = this.events.filter(
       (ev) => Math.abs(ev.ts - clickTs) < duration * 0.02
     );
@@ -214,6 +212,10 @@ class Timeline {
     let tip = "Time: " + dateStr + " | Segment: " + segLabel;
     if (nearbyEvents.length > 0) {
       tip += " | Events: " + nearbyEvents.length;
+      const details = nearbyEvents.map(function (ev) {
+        return (ev.type || "?") + " (" + (ev.object_type || "other") + ")";
+      });
+      tip += " [" + details.join(", ") + "]";
     }
 
     this.tooltip.textContent = tip;

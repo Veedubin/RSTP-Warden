@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Detection zones: {{ camera_name }}{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Detection zones for {{ camera_name }}</h1>
+  <p>{{ zones|length }} zone(s) configured</p>
+</hgroup>
+
+<article>
+  <header>Zone list</header>
+  {% if zones %}
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Grid</th><th>Blocked cells</th><th>Frame</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for zone in zones %}
+      <tr>
+        <td><strong>{{ zone.name }}</strong></td>
+        <td>{{ zone.grid_cols }}x{{ zone.grid_rows }}</td>
+        <td>{{ zone.blocked_cells|length }}</td>
+        <td>{{ zone.frame_width }}x{{ zone.frame_height }}</td>
+        <td>
+          <a href="/cameras/{{ camera_name }}/zones/editor?zone_name={{ zone.name|urlencode }}"
+             class="secondary" role="button">Edit</a>
+          <form method="POST" action="/cameras/{{ camera_name }}/zones/{{ zone.name|urlencode }}/delete"
+                style="display:inline"
+                onsubmit="return confirm('Delete zone {{ zone.name }}?')">
+            <input type="hidden" name="csrf_token"
+                   value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <button type="submit" class="contrast outline" style="display:inline">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No detection zones configured. Zones let you block parts of the frame to ignore detections in those areas.</p>
+  {% endif %}
+</article>
+
+<div id="zone-editor-target">
+  {% if not zones %}
+  <a href="/cameras/{{ camera_name }}/zones/editor" role="button">Add new zone</a>
+  {% endif %}
+</div>
+
+{# Reload detectors button #}
+<article>
+  <header>Apply changes</header>
+  <p>After editing zones, reload detectors to apply the changes immediately (no server restart needed).</p>
+  <form method="POST" action="/cameras/{{ camera_name }}/zones/reload">
+    <input type="hidden" name="csrf_token"
+           value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    <button type="submit" class="secondary">Reload detectors</button>
+  </form>
+</article>
+
+<p><a href="/cameras/{{ camera_name }}">&larr; Back to camera</a></p>
+{% endblock %}

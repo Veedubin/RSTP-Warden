@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Sensitivity: {{ camera_name }}{% endblock %}
+
+{% block content %}
+<hgroup>
+  <h1>Sensitivity for {{ camera_name }}</h1>
+  <p>Adjust how aggressively detections are triggered</p>
+</hgroup>
+
+<article x-data="{ sensitivity: {{ sensitivity }}, saving: false }">
+  <header>Sensitivity</header>
+
+  <p>
+    Current: <strong x-text="sensitivity"></strong>
+    <span x-show="sensitivity >= 70">(high)</span>
+    <span x-show="sensitivity > 30 && sensitivity < 70">(neutral)</span>
+    <span x-show="sensitivity <= 30">(low)</span>
+  </p>
+
+  <div class="grid">
+    <label for="sensitivity-slider">
+      Detection sensitivity
+      <input type="range" id="sensitivity-slider"
+             x-model="sensitivity" min="0" max="100" step="5"
+             name="sensitivity">
+    </label>
+  </div>
+
+  <div class="grid" style="text-align:center">
+    <small>Less sensitive</small>
+    <small></small>
+    <small>More sensitive</small>
+  </div>
+
+  <footer>
+    <small>
+      For motion detectors, this controls MOG2 varThreshold.
+      For DNN/person/vehicle, this controls detection confidence threshold.
+      Higher sensitivity = more detections (lower thresholds).
+    </small>
+  </footer>
+</article>
+
+{# Per-detector mapping preview #}
+<article>
+  <header>Per-detector mapping</header>
+  <table>
+    <thead>
+      <tr><th>Detector type</th><th>Parameter</th><th>Current value</th></tr>
+    </thead>
+    <tbody>
+      {% for mapping in detector_mappings %}
+      <tr>
+        <td>{{ mapping.type }}</td>
+        <td>{{ mapping.param }}</td>
+        <td>{{ mapping.value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</article>
+
+<form method="POST" action="/cameras/{{ camera_name }}/sensitivity">
+  <input type="hidden" name="sensitivity" x-bind:value="sensitivity">
+  <input type="hidden" name="csrf_token"
+         value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+  <div class="grid">
+    <button type="submit">Save</button>
+    <a href="/cameras/{{ camera_name }}" role="button" class="secondary">Cancel</a>
+    <button type="submit" name="action" value="save_and_reload" class="contrast">Save + Reload Detectors</button>
+  </div>
+</form>
+
+<p><a href="/cameras/{{ camera_name }}">&larr; Back to camera</a></p>
+{% endblock %}

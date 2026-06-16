@@ -3,6 +3,10 @@
 Scans on-disk .ts segment files within a recording's time range and
 queries the events table for detector events, returning a unified
 TimelineData object suitable for JSON serialization by the API layer.
+
+Events are enriched with an ``object_type`` category and ``color``
+derived from the detector label so the timeline UI can render colored
+markers by object kind rather than severity alone.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ from pathlib import Path
 
 from ...db.engine import get_session
 from ...db.models import Camera, Event
+from ...detectors.categorize import categorize_object
 from .htl import scan_segments
+from .timeline_colors import color_for_object_type
 
 
 @dataclass(slots=True)
@@ -34,6 +40,8 @@ class TimelineEvent:
     event_type: str
     severity: str
     ts_unix: float
+    object_type: str = "other"
+    color: str = "#7f8c8d"
 
 
 @dataclass(slots=True)
@@ -127,12 +135,16 @@ def build_timeline(
         query = query.order_by(Event.created_at.asc())
         rows = query.all()
         for row in rows:
+            obj_type = categorize_object(row.event_type)
+            obj_color = color_for_object_type(obj_type)
             events.append(
                 TimelineEvent(
                     id=row.id,
                     event_type=row.event_type,
                     severity=row.severity,
                     ts_unix=row.created_at.timestamp(),
+                    object_type=obj_type,
+                    color=obj_color,
                 )
             )
 
