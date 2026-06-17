@@ -1,5 +1,9 @@
 # rtsp-warden
 
+<p align="center">
+  <img src="docs/assets/rtsp-warden-logo.png" alt="rtsp-warden logo" width="320">
+</p>
+
 A self-hosted Network Video Recorder (NVR) for RTSP cameras. Records continuously or on event, runs motion / person / vehicle / DNN detection in-process, and exposes a web UI for live viewing, playback, and admin. No cloud, no subscriptions, no agent on each camera.
 
 ## What it does
@@ -396,3 +400,7 @@ These are the stable contracts other code depends on. Do not break them in PRs:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Brand assets
+
+The project logo lives at [`docs/assets/rtsp-warden-logo.png`](docs/assets/rtsp-warden-logo.png) (1794×1794, 3.3 MB PNG). Use this as the source for the GitHub social preview — upload a resized variant (1280×640 recommended) via **Settings → Social preview** on the repo page.
