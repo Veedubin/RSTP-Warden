@@ -51,3 +51,6 @@ test-results/
 Archive.zip
 *.bak
 *.tmp
+
+# Internal sprint planning documents
+SPRINT*_PLAN.md
