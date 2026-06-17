@@ -386,7 +386,7 @@ class TestSettings:
         """Admin user should see the system settings page."""
         r = admin_client.get("/settings")
         assert r.status_code == 200
-        assert "1.0.0" in r.text  # version
+        assert "1.3.0" in r.text  # version
         assert "System Settings" in r.text
 
     def test_settings_requires_admin(self, viewer_client: TestClient) -> None:
