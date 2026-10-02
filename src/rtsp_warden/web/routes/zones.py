@@ -115,13 +115,10 @@ async def zones_editor(
     frame_height = existing_zone.frame_height if existing_zone else 1080
     blocked_cells = existing_zone.blocked_cells if existing_zone else set()
 
-    # Build snapshot URL from camera proxy config
+    # Same-origin snapshot served by this app from the in-process FrameHub.
     snapshot_url = ""
     if cam.proxy.enabled and cam.proxy.mode == "mjpeg":
-        host = cam.proxy.bind_host
-        if host == "0.0.0.0":
-            host = "127.0.0.1"
-        snapshot_url = f"http://{host}:{cam.proxy.port}/snapshot.jpg"
+        snapshot_url = f"/cameras/{name}/snapshot.jpg"
 
     # Serialize blocked cells as list of "col,row" strings for Alpine.js
     blocked_cells_json = [{"col": c, "row": r} for c, r in sorted(blocked_cells)]

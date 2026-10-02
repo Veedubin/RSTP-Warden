@@ -4,7 +4,11 @@
          hx-swap="outerHTML">
   <header>
     <a href="/cameras/{{ camera.name }}">{{ camera.name }}</a>
-    <span class="status-dot status-{{ camera.status }}"></span>
+    <span class="status-dot status-{{ camera.status }}" title="{{ camera.status }}"></span>
+    <small class="status-label status-{{ camera.status }}">
+      {% if camera.status == 'restarting' %}restarting in {{ camera.restart_in }}s
+      {% else %}{{ camera.status }}{% endif %}
+    </small>
   </header>
   <div class="camera-card-body">
     <small>
@@ -14,5 +18,8 @@
     </small>
     <br>
     <small>{{ camera.main_url_redacted }}</small>
+    {% if camera.last_error and camera.status != 'running' %}
+    <br><small class="camera-error" title="{{ camera.last_error }}">{{ camera.last_error[:120] }}</small>
+    {% endif %}
   </div>
 </article>

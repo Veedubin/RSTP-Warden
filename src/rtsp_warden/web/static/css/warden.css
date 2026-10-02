@@ -119,3 +119,13 @@
   padding: 1rem;
   text-align: center;
 }
+/* Live camera status (Task 11): running | restarting | failed | idle | unknown */
+.status-label { margin-left: 0.4rem; text-transform: lowercase; }
+.status-running { color: #2e7d32; }
+.status-restarting { color: #b26a00; }
+.status-failed { color: #c62828; }
+.status-idle, .status-unknown { color: var(--pico-muted-color, #777); }
+.status-dot.status-running { background: #2e7d32; }
+.status-dot.status-restarting { background: #b26a00; }
+.status-dot.status-failed { background: #c62828; }
+.camera-error { color: #c62828; word-break: break-word; }

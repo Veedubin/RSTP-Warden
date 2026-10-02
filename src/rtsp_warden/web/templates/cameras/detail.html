@@ -45,7 +45,14 @@
       <tr><td>Proxy</td><td>{{ 'Enabled' if camera.has_proxy else 'Disabled' }}{% if camera.has_proxy %} ({{ camera.proxy_mode }}, port {{ camera.proxy_port }}){% endif %}</td></tr>
       <tr><td>Main URL</td><td><code>{{ camera.main_url_redacted }}</code></td></tr>
       <tr><td>Sub URL</td><td><code>{{ camera.sub_url_redacted or "not configured (using main)" }}</code></td></tr>
-      <tr><td>Status</td><td>{{ camera.status }}</td></tr>
+      <tr><td>Status</td><td>
+        <span class="status-label status-{{ camera.status }}">
+          {% if camera.status == 'restarting' %}restarting in {{ camera.restart_in }}s{% else %}{{ camera.status }}{% endif %}
+        </span>
+      </td></tr>
+      {% if camera.last_error %}
+      <tr><td>Last error</td><td><small class="camera-error">{{ camera.last_error }}</small></td></tr>
+      {% endif %}
     </tbody>
   </table>
 </article>

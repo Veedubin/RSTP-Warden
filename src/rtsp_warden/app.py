@@ -36,6 +36,25 @@ class CameraRuntime:
     rec_backoff: ExponentialBackoff
     proxy_backoff: ExponentialBackoff
 
+    # Set by the supervisor so the web UI can show a restart countdown and the last error.
+    next_restart_at: float = 0.0
+    last_error: str = ""
+
+
+def _last_stderr_line(procs: list) -> str:
+    """Return the last non-empty stderr line across ingest processes, or ''."""
+    for sp in procs:
+        proc = getattr(sp, "proc", None)
+        if proc is None:
+            continue
+        try:
+            tail = [ln for ln in proc.stderr_tail() if ln.strip()]
+        except Exception:
+            continue
+        if tail:
+            return tail[-1][:300]
+    return ""
+
 
 @dataclass
 class AppRuntime:
@@ -187,15 +206,19 @@ class AppRuntime:
                     if all_running:
                         rt.rec_backoff.reset()
                         next_rec_restart[key] = 0.0
+                        rt.next_restart_at = 0.0
                     elif any_dead:
                         if sched <= 0.0:
                             delay = rt.rec_backoff.next_delay()
                             next_rec_restart[key] = now + delay
+                            rt.next_restart_at = now + delay
+                            rt.last_error = _last_stderr_line(procs)
                             log.warning(
                                 f"[supervisor] ingest for {key} died; restarting in {delay:.1f}s"
                             )
                         elif now >= sched:
                             log.info(f"[supervisor] restarting ingest for {key}")
+                            rt.next_restart_at = 0.0
                             rt.recorder.stop()
 
                             # For RTSP proxy publish, ensure MediaMTX is up before restarting FFmpeg.

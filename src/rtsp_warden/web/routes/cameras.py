@@ -13,7 +13,13 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.templating import Jinja2Templates
 
 from ...config import AppConfig, CameraConfig, DetectorSpec, RetentionConfig
@@ -21,6 +27,7 @@ from ..auth_depends import CurrentUser, require_admin, require_user
 from ..config_lock import _locked_write_yaml
 from ..paths import TEMPLATES_DIR
 from ..services.cameras import get_camera_by_name, get_camera_detectors, list_cameras
+from ..services.preview import MJPEG_CONTENT_TYPE, find_hub, mjpeg_frames
 from ..services.recordings import list_recordings
 
 log = logging.getLogger(__name__)
@@ -243,7 +250,7 @@ def _find_camera_config(cfg: AppConfig, name: str) -> CameraConfig | None:
 async def cameras_list(request: Request, user=Depends(require_user)) -> HTMLResponse:
     """Render the camera grid page."""
     cfg = _get_cfg(request)
-    cameras = list_cameras(cfg)
+    cameras = list_cameras(cfg, request.app.state.runtime_provider())
     return _templates.TemplateResponse(
         request,
         "cameras/list.html",
@@ -254,24 +261,45 @@ async def cameras_list(request: Request, user=Depends(require_user)) -> HTMLResp
     )
 
 
+@router.get("/{name}/snapshot.jpg")
+async def camera_snapshot(request: Request, name: str, user=Depends(require_user)) -> Response:
+    """Latest JPEG frame from the in-process hub."""
+    hub = find_hub(request.app.state.runtime_provider(), name)
+    if hub is None:
+        raise HTTPException(status_code=503, detail="No live preview for this camera")
+    jpeg, _fid, _ts = hub.snapshot()
+    if not jpeg:
+        raise HTTPException(status_code=503, detail="No frame yet")
+    return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{name}/live.mjpeg")
+async def camera_live(request: Request, name: str, user=Depends(require_user)) -> StreamingResponse:
+    """Same-origin MJPEG stream; replaces links to the side-server on 127.0.0.1."""
+    hub = find_hub(request.app.state.runtime_provider(), name)
+    if hub is None:
+        raise HTTPException(status_code=503, detail="No live preview for this camera")
+    return StreamingResponse(
+        mjpeg_frames(hub),
+        media_type=MJPEG_CONTENT_TYPE,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/{name}", response_class=HTMLResponse)
 async def camera_detail(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
     """Render a single camera detail page."""
     cfg = _get_cfg(request)
-    cam = get_camera_by_name(cfg, name)
+    cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
-    # Build MJPEG and snapshot URLs for proxy-enabled cameras
+    # Same-origin preview URLs served by this app from the in-process FrameHub.
     mjpeg_url = ""
     snapshot_url = ""
     if cam["has_proxy"] and cam["proxy_mode"] == "mjpeg":
-        host = cam.get("bind_host", "127.0.0.1")
-        if host == "0.0.0.0":
-            host = "127.0.0.1"
-        port = cam["proxy_port"]
-        mjpeg_url = f"http://{host}:{port}/mjpeg"
-        snapshot_url = f"http://{host}:{port}/snapshot.jpg"
+        mjpeg_url = f"/cameras/{name}/live.mjpeg"
+        snapshot_url = f"/cameras/{name}/snapshot.jpg"
 
     # Recent recordings for this camera (last 10)
     try:
@@ -314,7 +342,7 @@ async def camera_detail(request: Request, name: str, user=Depends(require_user))
 async def camera_status(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
     """Return a partial camera card for htmx auto-refresh."""
     cfg = _get_cfg(request)
-    cam = get_camera_by_name(cfg, name)
+    cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 

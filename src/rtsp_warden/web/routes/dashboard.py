@@ -32,7 +32,7 @@ async def dashboard(request: Request, user=Depends(require_user)) -> HTMLRespons
     rt = rt_provider() if rt_provider else None
 
     # Camera data
-    cameras = list_cameras(cfg) if cfg else []
+    cameras = list_cameras(cfg, request.app.state.runtime_provider()) if cfg else []
 
     # Runtime status
     status = (
