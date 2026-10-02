@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from starlette.templating import Jinja2Templates
 
 from ...config import AppConfig
 from ...onvif.discovery import OnvifDiscovery, OnvifError
@@ -26,11 +24,10 @@ from ...onvif.events import (
 from ...onvif.presets import PTZPresetError, PTZPresetStore
 from ...onvif.ptz import OnvifClient, OnvifPTZ
 from ..auth_depends import require_admin
-from ..paths import TEMPLATES_DIR
+from ._common import get_cfg, get_config_path, templates
 
 router = APIRouter(prefix="/onvif", tags=["onvif"])
 
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 log = logging.getLogger(__name__)
 
@@ -45,19 +42,11 @@ PTZ_ACTIONS: dict[str, dict[str, float]] = {
 }
 
 
-def _get_cfg(request: Request) -> AppConfig:
-    """Get the AppConfig from app state, raising 503 if unavailable."""
-    cfg = getattr(request.app.state, "cfg", None)
-    if cfg is None:
-        raise HTTPException(status_code=503, detail="Server configuration not loaded")
-    return cfg
-
-
 @router.get("", response_class=HTMLResponse)
 async def onvif_index(request: Request, user=Depends(require_admin)) -> HTMLResponse:
     """Show ONVIF discovery status and PTZ control page."""
-    cfg = _get_cfg(request)
-    return _templates.TemplateResponse(
+    cfg = get_cfg(request)
+    return templates.TemplateResponse(
         request,
         "onvif/index.html",
         {
@@ -70,7 +59,7 @@ async def onvif_index(request: Request, user=Depends(require_admin)) -> HTMLResp
 @router.post("/discover")
 async def onvif_discover(request: Request, user=Depends(require_admin)) -> JSONResponse:
     """Run WS-Discovery and return discovered cameras as JSON."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
 
     if not cfg.onvif.discovery_enabled:
         return JSONResponse(
@@ -111,7 +100,7 @@ async def onvif_ptz(request: Request, name: str, user=Depends(require_admin)) ->
     Body: {"action": "left"|"right"|"up"|"down"|"zoom_in"|"zoom_out"|"stop",
            "duration_ms": 500}
     """
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
 
     if not cfg.onvif.ptz_enabled:
         return JSONResponse(
@@ -177,24 +166,13 @@ async def onvif_ptz(request: Request, name: str, user=Depends(require_admin)) ->
 # ---------------------------------------------------------------------------
 
 
-def _get_config_path(request: Request) -> Path | None:
-    """Try to determine the config file path from app state.
-
-    Returns None if the path is not available (in-memory config only).
-    """
-    config_path = getattr(request.app.state, "config_path", None)
-    if config_path is not None:
-        return Path(config_path)
-    return None
-
-
 @router.get("/cameras/{name}/ptz", response_class=HTMLResponse)
 async def onvif_ptz_page(request: Request, name: str, user=Depends(require_admin)) -> HTMLResponse:
     """Render the PTZ control and presets page for a specific camera."""
-    cfg = _get_cfg(request)
-    store = PTZPresetStore(cfg, config_path=_get_config_path(request))
+    cfg = get_cfg(request)
+    store = PTZPresetStore(cfg, config_path=get_config_path(request))
     presets = store.list_presets(name)
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "onvif/index.html",
         {
@@ -211,7 +189,7 @@ async def onvif_list_presets(
     request: Request, name: str, user=Depends(require_admin)
 ) -> JSONResponse:
     """List PTZ presets for a camera as JSON."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     store = PTZPresetStore(cfg)
     presets = store.list_presets(name)
     return JSONResponse(
@@ -232,7 +210,7 @@ async def onvif_goto_preset(
 
     Body: {"preset_name": "front_gate"}
     """
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
 
     if not cfg.onvif.ptz_enabled:
         return JSONResponse(
@@ -279,8 +257,8 @@ async def onvif_save_preset(
 
     Body: {"name": "front_gate", "pan": 0.5, "tilt": 0.3, "zoom": 0.0}
     """
-    cfg = _get_cfg(request)
-    store = PTZPresetStore(cfg, config_path=_get_config_path(request))
+    cfg = get_cfg(request)
+    store = PTZPresetStore(cfg, config_path=get_config_path(request))
 
     body = await request.json()
     preset_name = body.get("name", "")
@@ -305,8 +283,8 @@ async def onvif_delete_preset(
     request: Request, name: str, preset_name: str, user=Depends(require_admin)
 ) -> RedirectResponse:
     """Delete a PTZ preset and redirect back to the PTZ page."""
-    cfg = _get_cfg(request)
-    store = PTZPresetStore(cfg, config_path=_get_config_path(request))
+    cfg = get_cfg(request)
+    store = PTZPresetStore(cfg, config_path=get_config_path(request))
 
     await store.delete_preset(name, preset_name)
 
@@ -372,7 +350,7 @@ async def onvif_events_subscribe(
     for status tracking. The subscriber polls PullMessages at the
     configured interval and fires events into the alert system.
     """
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
 
     if not cfg.onvif.events_enabled:
         return JSONResponse(

@@ -20,21 +20,19 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from starlette.templating import Jinja2Templates
 
 from ...config import AppConfig, CameraConfig, DetectorSpec, RetentionConfig
 from ..auth_depends import CurrentUser, require_admin, require_user
 from ..config_lock import _locked_write_yaml
-from ..paths import TEMPLATES_DIR
 from ..services.cameras import get_camera_by_name, get_camera_detectors, list_cameras
 from ..services.preview import MJPEG_CONTENT_TYPE, find_hub, mjpeg_frames
 from ..services.recordings import list_recordings
+from ._common import find_camera, get_cfg, get_config_path, templates
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cameras")
 
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # 80 COCO class names used by YOLOv4-tiny DNN detectors.
 COCO_CLASSES: list[str] = [
@@ -219,39 +217,12 @@ def _group_classes_for_template() -> list[tuple[str, list[str]]]:
     return [(cat, classes) for cat, classes in _CLASS_CATEGORIES.items()]
 
 
-def _get_cfg(request: Request) -> AppConfig:
-    """Get the AppConfig from app state, raising 503 if unavailable."""
-    cfg = getattr(request.app.state, "cfg", None)
-    if cfg is None:
-        raise HTTPException(status_code=503, detail="Server configuration not loaded")
-    return cfg
-
-
-def _get_config_path(request: Request) -> Path | None:
-    """Try to determine the config file path from app state.
-
-    Returns None if the path is not available (in-memory config only).
-    """
-    config_path = getattr(request.app.state, "config_path", None)
-    if config_path is not None:
-        return Path(config_path)
-    return None
-
-
-def _find_camera_config(cfg: AppConfig, name: str) -> CameraConfig | None:
-    """Find a CameraConfig object by name."""
-    for cam in cfg.cameras:
-        if cam.name == name:
-            return cam
-    return None
-
-
 @router.get("", response_class=HTMLResponse)
 async def cameras_list(request: Request, user=Depends(require_user)) -> HTMLResponse:
     """Render the camera grid page."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     cameras = list_cameras(cfg, request.app.state.runtime_provider())
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/list.html",
         {
@@ -289,7 +260,7 @@ async def camera_live(request: Request, name: str, user=Depends(require_user)) -
 @router.get("/{name}", response_class=HTMLResponse)
 async def camera_detail(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
     """Render a single camera detail page."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
@@ -308,7 +279,7 @@ async def camera_detail(request: Request, name: str, user=Depends(require_user))
         recent_recordings = []
 
     # Retention info for the detail page
-    cam_config = _find_camera_config(cfg, name)
+    cam_config = find_camera(cfg, name)
     from ...retention_resolver import resolve_retention
 
     effective_retention = (
@@ -320,7 +291,7 @@ async def camera_detail(request: Request, name: str, user=Depends(require_user))
     sensitivity = cam_config.sensitivity if cam_config else 50.0
     detect_classes = cam_config.detect_classes if cam_config else None
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/detail.html",
         {
@@ -341,12 +312,12 @@ async def camera_detail(request: Request, name: str, user=Depends(require_user))
 @router.get("/{name}/status", response_class=HTMLResponse)
 async def camera_status(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
     """Return a partial camera card for htmx auto-refresh."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "partials/camera_card.html",
         {
@@ -365,7 +336,7 @@ async def camera_settings(
     Displays the camera's full configuration and a banner explaining
     that changes require editing config.yaml and restarting the server.
     """
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     # Find the raw CameraConfig object (not the dict from get_camera_by_name)
     cam_config: CameraConfig | None = None
     for cam in cfg.cameras:
@@ -402,7 +373,7 @@ async def camera_settings(
     settings_data["retention_max_gb"] = retention.max_gb
     settings_data["retention_keep_last_n"] = retention.keep_last_n
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/settings.html",
         {
@@ -423,13 +394,13 @@ async def cameras_detectors_partial(
 
     Returns the partial template HTML directly.
     """
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     detectors = get_camera_detectors(cfg, name)
     has_roi = any(d["has_roi"] for d in detectors)
     has_masks = any(d["has_masks"] for d in detectors)
     num_masks = sum(1 for d in detectors if d["has_masks"])
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "partials/detector_list.html",
         {
@@ -459,12 +430,12 @@ async def save_camera_retention(
 
     On success, redirects to the camera detail page.
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     form = await request.form()
 
     # Handle "reset to global" action
@@ -526,8 +497,8 @@ async def reload_camera_detectors(
     if app_rt is None:
         raise HTTPException(status_code=503, detail="Server runtime not initialized")
 
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -552,8 +523,8 @@ async def camera_sensitivity_page(
 
     Shows a slider (0-100) and per-detector mapping preview.
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -603,7 +574,7 @@ async def camera_sensitivity_page(
                 }
             )
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/sensitivity.html",
         {
@@ -630,8 +601,8 @@ async def save_camera_sensitivity(
     On success, redirects to the camera detail page (or sensitivity page
     if save_and_reload fails).
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -650,7 +621,7 @@ async def save_camera_sensitivity(
     cam_config.sensitivity = float(sensitivity)
 
     # Persist to config.yaml
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     if config_path is not None:
         _persist_camera_field(config_path, name, "sensitivity", cam_config.sensitivity)
 
@@ -672,8 +643,8 @@ async def camera_detection_classes_page(
 
     Shows checkboxes for all 80 COCO classes, grouped by category.
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -681,7 +652,7 @@ async def camera_detection_classes_page(
     active_classes_set = set(active_classes)
     class_groups = _group_classes_for_template()
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/detection_classes.html",
         {
@@ -709,8 +680,8 @@ async def save_camera_detection_classes(
 
     On success, redirects to the camera detail page.
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -725,7 +696,7 @@ async def save_camera_detection_classes(
     cam_config.detect_classes = selected if selected else []
 
     # Persist to config.yaml
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     if config_path is not None:
         _persist_camera_field(config_path, name, "detect_classes", cam_config.detect_classes)
 
@@ -752,8 +723,8 @@ async def toggle_detector_enabled(
     After toggling, rebuilds the detector runner so changes take effect
     immediately, then redirects to the camera detail page.
     """
-    cfg = _get_cfg(request)
-    cam_config = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     if cam_config is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -775,7 +746,7 @@ async def toggle_detector_enabled(
         )
 
     # Persist to config.yaml
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     if config_path is not None:
         _persist_detectors(config_path, cfg)
 

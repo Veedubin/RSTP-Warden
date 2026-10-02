@@ -13,45 +13,15 @@ from pathlib import Path
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from starlette.templating import Jinja2Templates
 
-from ...config import AppConfig, CameraConfig, GridZoneConfig
+from ...config import AppConfig, GridZoneConfig
 from ..auth_depends import CurrentUser, require_admin
 from ..config_lock import _locked_write_yaml
-from ..paths import TEMPLATES_DIR
+from ._common import find_camera, get_cfg, get_config_path, templates
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cameras")
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-def _get_cfg(request: Request) -> AppConfig:
-    """Get the AppConfig from app state, raising 503 if unavailable."""
-    cfg = getattr(request.app.state, "cfg", None)
-    if cfg is None:
-        raise HTTPException(status_code=503, detail="Server configuration not loaded")
-    return cfg
-
-
-def _get_config_path(request: Request) -> Path | None:
-    """Try to determine the config file path from app state.
-
-    Returns None if the path is not available (in-memory config only).
-    """
-    config_path = getattr(request.app.state, "config_path", None)
-    if config_path is not None:
-        return Path(config_path)
-    return None
-
-
-def _find_camera_config(cfg: AppConfig, name: str) -> CameraConfig | None:
-    """Find a CameraConfig object by name."""
-    for cam in cfg.cameras:
-        if cam.name == name:
-            return cam
-    return None
 
 
 @router.get("/{name}/zones", response_class=HTMLResponse)
@@ -64,12 +34,12 @@ async def zones_list(
 
     Lists existing zones and provides links to add/edit/delete zones.
     """
-    cfg = _get_cfg(request)
-    cam = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/zones.html",
         {
@@ -96,8 +66,8 @@ async def zones_editor(
     Returns:
         HTML partial with SVG grid overlay and snapshot image.
     """
-    cfg = _get_cfg(request)
-    cam = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -123,7 +93,7 @@ async def zones_editor(
     # Serialize blocked cells as list of "col,row" strings for Alpine.js
     blocked_cells_json = [{"col": c, "row": r} for c, r in sorted(blocked_cells)]
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "cameras/zones_editor.html",
         {
@@ -158,8 +128,8 @@ async def save_zone(
 
     On success, redirects to /cameras/{name}/zones.
     """
-    cfg = _get_cfg(request)
-    cam = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
@@ -238,7 +208,7 @@ async def save_zone(
     cam.zones = updated_zones
 
     # Persist to config.yaml
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     if config_path is not None:
         _persist_zones(config_path, cfg)
 
@@ -256,15 +226,15 @@ async def delete_zone(
 
     On success, redirects to /cameras/{name}/zones.
     """
-    cfg = _get_cfg(request)
-    cam = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
     cam.zones = [z for z in cam.zones if z.name != zone_name]
 
     # Persist to config.yaml
-    config_path = _get_config_path(request)
+    config_path = get_config_path(request)
     if config_path is not None:
         _persist_zones(config_path, cfg)
 
@@ -291,8 +261,8 @@ async def reload_zones(
     if app_rt is None:
         raise HTTPException(status_code=503, detail="Server runtime not initialized")
 
-    cfg = _get_cfg(request)
-    cam = _find_camera_config(cfg, name)
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 

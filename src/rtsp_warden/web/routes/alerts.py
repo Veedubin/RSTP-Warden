@@ -8,23 +8,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from starlette.templating import Jinja2Templates
 
-from ...config import AppConfig
 from ..auth_depends import CurrentUser, require_admin
-from ..paths import TEMPLATES_DIR
+from ._common import get_cfg, templates
 
 router = APIRouter(prefix="/alerts")
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-def _get_cfg(request: Request) -> AppConfig:
-    """Get AppConfig from app state, raising 500 if missing."""
-    cfg = getattr(request.app.state, "cfg", None)
-    if cfg is None:
-        raise HTTPException(status_code=500, detail="AppConfig not available")
-    return cfg
 
 
 def _get_alert_manager(request: Request):
@@ -35,10 +23,10 @@ def _get_alert_manager(request: Request):
 @router.get("", response_class=HTMLResponse)
 async def alerts_list(request: Request, user: CurrentUser = Depends(require_admin)) -> HTMLResponse:
     """Render the alerts list page (admin-only)."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     notifiers = cfg.alerts.notifiers
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "alerts/list.html",
         {
@@ -88,7 +76,7 @@ async def new_notifier_form(
     request: Request, user: CurrentUser = Depends(require_admin)
 ) -> HTMLResponse:
     """Render the new notifier form."""
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "alerts/new.html",
         {
@@ -105,7 +93,7 @@ async def edit_notifier_form(
     user: CurrentUser = Depends(require_admin),
 ) -> HTMLResponse:
     """Render the edit notifier form."""
-    cfg = _get_cfg(request)
+    cfg = get_cfg(request)
     notifier = None
     for n in cfg.alerts.notifiers:
         if n.name == name:
@@ -115,7 +103,7 @@ async def edit_notifier_form(
     if notifier is None:
         raise HTTPException(status_code=404, detail=f"No notifier named {name!r}")
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "alerts/edit.html",
         {
