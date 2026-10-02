@@ -49,7 +49,7 @@ async def alerts_list(request: Request, user: CurrentUser = Depends(require_admi
     )
 
 
-@router.get("/{name}/test", response_class=JSONResponse)
+@router.post("/{name}/test", response_class=JSONResponse)
 async def test_notifier(
     request: Request,
     name: str,

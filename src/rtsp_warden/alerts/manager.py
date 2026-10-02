@@ -38,16 +38,25 @@ class AlertManager:
         self._spec_map: dict[str, Any] = {}  # name -> NotifierSpec for severity/interval lookup
         # Per-notifier debounce tracking: {(notifier_name, camera, event_type): last_sent_at}
         self._last_sent: dict[tuple[str, str, str], datetime] = {}
+        self._build()
 
-    async def start(self) -> None:
-        """Initialize notifiers from config."""
+    def _build(self) -> None:
+        """Instantiate notifiers from config so the manager is usable immediately."""
         self._notifiers = []
         self._spec_map = {}
         for spec in self._cfg.notifiers:
             notifier = build_notifier(spec)
             self._notifiers.append(notifier)
             self._spec_map[spec.name] = spec
-        logger.info("AlertManager started with %d notifier(s)", len(self._notifiers))
+
+    @property
+    def notifiers(self) -> list[Any]:
+        """The configured notifier instances."""
+        return list(self._notifiers)
+
+    async def start(self) -> None:
+        """Kept for API compatibility; notifiers are built in ``__init__``."""
+        logger.info("AlertManager ready with %d notifier(s)", len(self._notifiers))
 
     async def stop(self) -> None:
         """Close httpx clients on all notifiers."""

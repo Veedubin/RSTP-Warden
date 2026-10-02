@@ -153,7 +153,7 @@ class TestAlertsWebUI:
         assert "webhook" in r.text
 
     def test_alerts_test_endpoint(self, admin_client: TestClient) -> None:
-        """GET /alerts/test-name/test returns JSON with success status (mocked manager)."""
+        """POST /alerts/test-name/test returns JSON with success status (mocked manager)."""
         # Mock the AlertManager on app state
         mock_result = NotificationResult(
             notifier_name="test-phone",
@@ -165,11 +165,14 @@ class TestAlertsWebUI:
         mock_manager.test_notifier = AsyncMock(return_value=mock_result)
         admin_client.app.state.alert_manager = mock_manager
 
-        r = admin_client.get("/alerts/test-phone/test")
+        token = admin_client.cookies.get("warden_csrf", "")
+        r = admin_client.post("/alerts/test-phone/test", headers={"X-CSRF-Token": token})
         assert r.status_code == 200
         body = r.json()
         assert body["success"] is True
         assert body["notifier_name"] == "test-phone"
+        # The test button is an htmx POST; GET is no longer an action.
+        assert admin_client.get("/alerts/test-phone/test").status_code == 405
 
     def test_alerts_page_requires_admin(self, viewer_client: TestClient) -> None:
         """Non-admin GET /alerts -> 403."""
