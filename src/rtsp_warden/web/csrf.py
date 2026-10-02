@@ -4,11 +4,12 @@ Sets a ``warden_csrf`` cookie on every response (if absent). For mutating
 HTTP methods (POST, PUT, DELETE, PATCH), validates that either:
 
 1. The ``X-CSRF-Token`` header matches the cookie, OR
-2. The ``csrf_token`` query parameter matches the cookie.
+2. The ``csrf_token`` query parameter matches the cookie, OR
+3. The ``csrf_token`` form field matches the cookie (form-encoded or
+   multipart bodies).
 
-For form submissions, HTML forms should include a hidden ``csrf_token``
-field and use htmx's ``hx-headers`` attribute to copy it into the
-``X-CSRF-Token`` header. This is the standard htmx CSRF pattern.
+Plain HTML forms include a hidden ``csrf_token`` field. htmx requests get
+the header from the global ``htmx:configRequest`` hook in ``warden.js``.
 
 GET, HEAD, and OPTIONS requests are exempt from validation.
 """
@@ -28,6 +29,27 @@ CSRF_TOKEN_LENGTH = 32  # 32 bytes -> 64 hex chars
 
 MUTATING_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 
+_FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
+
+
+async def _token_from_form(request: Request) -> str | None:
+    """Read ``csrf_token`` from a form body, or None for non-form requests.
+
+    Starlette's BaseHTTPMiddleware replays a body that was cached through
+    ``request.body()``; ``request.form()`` alone drains the stream without
+    caching, so the body is read first to keep it available to the handler.
+    """
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith(_FORM_CONTENT_TYPES):
+        return None
+    try:
+        await request.body()
+        form = await request.form()
+    except Exception:
+        return None
+    value = form.get(CSRF_FORM_FIELD)
+    return value if isinstance(value, str) else None
+
 
 class CSRFMiddleware(BaseHTTPMiddleware):
     """Starlette middleware enforcing CSRF protection via double-submit cookie.
@@ -45,11 +67,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not csrf_cookie:
             csrf_cookie = secrets.token_hex(CSRF_TOKEN_LENGTH)
 
-        # Validate on mutating requests (header or query param)
+        # Validate on mutating requests (header, query param, or form field)
         if request.method in MUTATING_METHODS:
             provided_token = request.headers.get(CSRF_HEADER_NAME)
             if not provided_token:
                 provided_token = request.query_params.get(CSRF_FORM_FIELD)
+            if not provided_token:
+                provided_token = await _token_from_form(request)
 
             if not provided_token or provided_token != csrf_cookie:
                 return JSONResponse(

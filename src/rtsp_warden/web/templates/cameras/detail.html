@@ -97,6 +97,7 @@
   <details>
     <summary role="button" class="secondary">Edit retention</summary>
     <form method="POST" action="/cameras/{{ camera.name }}/retention">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <div class="grid">
         <label for="ret-max-days">
           Max days
