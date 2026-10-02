@@ -34,7 +34,7 @@ def list_cameras(cfg: AppConfig) -> list[dict[str, Any]]:
                 "proxy_port": cam.proxy.port,
                 "has_proxy": cam.proxy.enabled,
                 "main_url_redacted": redact_rtsp_url(cam.main_url),
-                "sub_url_redacted": redact_rtsp_url(cam.sub_url),
+                "sub_url_redacted": redact_rtsp_url(cam.sub_url) if cam.sub_url else None,
                 "status": "unknown",
                 "stream": cam.proxy.stream,
                 "bind_host": cam.proxy.bind_host,

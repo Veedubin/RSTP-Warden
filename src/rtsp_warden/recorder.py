@@ -355,6 +355,8 @@ class CameraRecorder:
 
     def _build_ingestor(self, stream_name: StreamName) -> StreamIngestor | None:
         cam = self.camera
+        if stream_name == "sub" and cam.sub_url is None:
+            return None
 
         # Record requirements.
         record_cfg: StreamRecordConfig | None = None
@@ -388,6 +390,7 @@ class CameraRecorder:
             return None
 
         upstream = cam.main_url if stream_name == "main" else cam.sub_url
+        assert upstream is not None
 
         # Even if record is disabled, re-use rtsp_transport setting from record cfg defaults.
         # This avoids introducing a new config knob in the parallel phase.

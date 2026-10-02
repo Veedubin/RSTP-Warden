@@ -16,7 +16,7 @@
   <table>
     <tbody>
       <tr><td><strong>Main Stream URL</strong></td><td><code>{{ settings.main_url_redacted }}</code></td></tr>
-      <tr><td><strong>Sub Stream URL</strong></td><td><code>{{ settings.sub_url_redacted }}</code></td></tr>
+      <tr><td><strong>Sub Stream URL</strong></td><td><code>{{ settings.sub_url_redacted or "not configured (using main)" }}</code></td></tr>
     </tbody>
   </table>
 

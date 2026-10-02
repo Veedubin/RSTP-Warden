@@ -44,7 +44,7 @@
       <tr><td>Recording</td><td>{{ 'Enabled' if camera.record_enabled else 'Disabled' }}</td></tr>
       <tr><td>Proxy</td><td>{{ 'Enabled' if camera.has_proxy else 'Disabled' }}{% if camera.has_proxy %} ({{ camera.proxy_mode }}, port {{ camera.proxy_port }}){% endif %}</td></tr>
       <tr><td>Main URL</td><td><code>{{ camera.main_url_redacted }}</code></td></tr>
-      <tr><td>Sub URL</td><td><code>{{ camera.sub_url_redacted }}</code></td></tr>
+      <tr><td>Sub URL</td><td><code>{{ camera.sub_url_redacted or "not configured (using main)" }}</code></td></tr>
       <tr><td>Status</td><td>{{ camera.status }}</td></tr>
     </tbody>
   </table>

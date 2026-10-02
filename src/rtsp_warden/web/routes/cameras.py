@@ -354,7 +354,7 @@ async def camera_settings(
     settings_data = {
         "name": cam_config.name,
         "main_url_redacted": redact_rtsp_url(cam_config.main_url),
-        "sub_url_redacted": redact_rtsp_url(cam_config.sub_url),
+        "sub_url_redacted": redact_rtsp_url(cam_config.sub_url) if cam_config.sub_url else None,
         "record_enabled": cam_config.record.enabled,
         "record_output_dir": str(cam_config.record.output_dir),
         "record_container": cam_config.record.main.container,

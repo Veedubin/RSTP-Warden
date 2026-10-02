@@ -281,7 +281,7 @@ class GridZoneConfig(BaseModel):
 class CameraConfig(BaseModel):
     name: str
     main_url: str
-    sub_url: str
+    sub_url: str | None = None  # optional; every sub-stream consumer falls back to main
 
     record: RecordConfig = Field(default_factory=RecordConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
@@ -309,6 +309,13 @@ class CameraConfig(BaseModel):
         if not 0.0 <= v <= 100.0:
             raise ValueError("sensitivity must be between 0.0 and 100.0")
         return v
+
+    @model_validator(mode="after")
+    def _fallback_proxy_stream(self) -> CameraConfig:
+        """Without a sub stream, the proxy (and frame tap) read the main stream."""
+        if self.sub_url is None and self.proxy.stream == "sub":
+            self.proxy.stream = "main"
+        return self
 
 
 # --- Sprint 4: event recording + alerts + ONVIF config types ---
