@@ -1,3 +1,5 @@
+> Archived: historical design note, superseded by CLAUDE.md and docs/superpowers/specs/. Commands and layout described here may no longer exist.
+
 # RTSP Warden — Master Context (Plan + Current Implementation)
 
 **Project name:** `rtsp-warden`  

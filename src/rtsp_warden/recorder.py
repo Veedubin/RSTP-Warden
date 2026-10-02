@@ -27,7 +27,7 @@ def _segment_out_pattern(
 ) -> str:
     """Canonical recording path contract.
 
-    {output_dir}/{camera}/{stream}/{camera}_{stream}_%Y%m%d_%H%M%S.{mkv|mp4}
+    {output_dir}/{camera}/{stream}/{camera}_{stream}_%Y%m%d_%H%M%S.ts
     """
     base = out_dir / camera_name / stream_name
     base.mkdir(parents=True, exist_ok=True)

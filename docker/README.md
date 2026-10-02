@@ -4,8 +4,8 @@ rtsp-warden ships with two Docker image variants:
 
 | Variant | Base | Size | Build Time | Use When |
 |---------|------|------|-----------|----------|
-| `Dockerfile` (default) | `python:3.13-slim` | ~1.21 GB | ~3 min | You need a shell in the container, debugging, or want broadest compatibility |
-| `Dockerfile.distroless` | `gcr.io/distroless/cc-debian13:nonroot` | **~685 MB** | ~3 min | Production deployments; you want a smaller, more secure image |
+| `Dockerfile` | `python:3.13-slim` | ~1.21 GB | ~3 min | You need a shell in the container, debugging, or want broadest compatibility |
+| `Dockerfile.distroless` (default) | `gcr.io/distroless/cc-debian13:nonroot` | **~685 MB** | ~3 min | Production deployments; you want a smaller, more secure image |
 
 **The distroless image is the default in `docker-compose.yml`.**
 
@@ -44,7 +44,7 @@ The BFS dependency collector is at `docker/collect-deps.sh`. It uses `ldd` to wa
 - **No package manager.** No `apt`, `apk`, `pip` (use the venv copied from the builder stage).
 - **No `curl`.** The HEALTHCHECK uses `python3 -c "import urllib.request; ..."` instead.
 - **No `chown` binary.** Ownership is set via `COPY --chown=nonroot:nonroot` at build time.
-- **No `mkdir` at runtime.** The `recordings/`, `config/`, `data/` directories are created by the application on first run, OR mounted as volumes.
+- **No `mkdir` at runtime.** Mount `config/`, `recordings/` and `data/` as volumes (the compose file does); the app does not create them.
 
 ### Healthcheck
 
@@ -71,7 +71,10 @@ docker run -v $(pwd)/recordings:/app/recordings rtsp-warden:distroless
 
 - **ONVIF discovery** uses UDP multicast to `239.255.255.250:3702`. This does NOT cross Docker bridge networks. Use `network_mode: host` for ONVIF discovery to work.
 - **Audio in/out** works normally; uses the same ffmpeg binary copied from the deps stage.
-- **Web UI** listens on 0.0.0.0:8080 (set `WARDEN_WEB_HOST=0.0.0.0` explicitly if needed).
+- **Web UI** binds `WARDEN_WEB_HOST` (compose sets `0.0.0.0`; the built-in default is `127.0.0.1`, which is unreachable from outside a container).
+- **Database** goes wherever `WARDEN_DB_URL` points; compose sets `sqlite:////app/data/warden.db` so it lands in the `./data` mount.
+- **First start** creates the schema and an admin user; the generated password is in `docker compose logs warden` unless `WARDEN_ADMIN_PASSWORD` is set.
+- **Camera credentials** referenced as `${CAM_USER}` / `${CAM_PASS}` in `config.yaml` come from the container environment (compose reads `.env`).
 
 ## Why Distroless?
 

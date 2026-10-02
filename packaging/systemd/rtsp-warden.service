@@ -1,6 +1,6 @@
 [Unit]
 Description=rtsp-warden — self-hosted RTSP NVR with web UI
-Documentation=https://github.com/jakobcharles/rtsp-warden
+Documentation=https://github.com/Veedubin/RSTP-Warden
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,8 @@ User=rtsp-warden
 Group=rtsp-warden
 WorkingDirectory=/var/lib/rtsp-warden
 
-ExecStart=/usr/local/bin/rtsp-warden serve -c /etc/rtsp-warden/config.yaml --web --web-port 8080
+# Bind host and port come from WARDEN_WEB_HOST / WARDEN_WEB_PORT in warden.env
+ExecStart=/usr/local/bin/rtsp-warden serve -c /etc/rtsp-warden/config.yaml --web
 
 Restart=on-failure
 RestartSec=5

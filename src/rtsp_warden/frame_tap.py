@@ -7,7 +7,7 @@ Design goals:
 - best-effort dispatch that never crashes ingest/proxy by default
 - stable API contract for later wiring (e.g., MJPEG path / frame hub)
 
-Integration is intentionally deferred to another bot / reconvergence.
+Wired into StreamIngestor (recorder.py) through the pipe:3 file descriptor; see CLAUDE.md.
 """
 
 from __future__ import annotations

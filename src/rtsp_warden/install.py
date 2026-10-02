@@ -40,20 +40,25 @@ POSTGRES_USER="warden"
 POSTGRES_PASSWORD="changeme"
 POSTGRES_DB="warden"
 
-# ---- Auth (filled in by `rtsp-warden install`) ----
+# ---- Admin bootstrap ----
+# Used by `rtsp-warden install`, and by `serve` when the users table is empty.
 WARDEN_ADMIN_USERNAME="admin"
 WARDEN_ADMIN_PASSWORD="changeme"
-WARDEN_SECRET="changeme"
 
-# ---- Auth gating ----
-# When true, /healthz, /status.json, /metrics require a valid session or API token.
-# Default: true (set by `rtsp-warden install`).
-# Set to false to disable auth on the health server (NOT recommended for production).
+# ---- Auth ----
+# When false, /login redirects straight to the dashboard.
+# /healthz, /status.json and /metrics are always public.
 WARDEN_AUTH_ENABLED="true"
 
-# When true, /healthz remains unauthenticated even if auth is enabled.
-# Useful for k8s/Docker liveness probes.
-WARDEN_AUTH_HEALTHZ_OPEN="false"
+# ---- Web UI ----
+WARDEN_WEB_HOST="127.0.0.1"   # 0.0.0.0 to expose beyond localhost (Docker sets this)
+WARDEN_WEB_PORT="8080"
+WARDEN_HTTPS="false"          # true behind a TLS-terminating reverse proxy
+
+# ---- Camera credentials ----
+# Referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}
+CAM_USER="admin"
+CAM_PASS="changeme"
 """
 
 
@@ -206,9 +211,7 @@ def run_install(
 
     env_lines["WARDEN_ADMIN_USERNAME"] = admin_username
     env_lines["WARDEN_ADMIN_PASSWORD"] = admin_password
-    env_lines["WARDEN_SECRET"] = app_secret
     env_lines["WARDEN_AUTH_ENABLED"] = "true"
-    env_lines["WARDEN_AUTH_HEALTHZ_OPEN"] = "false"
 
     _write_env_file(env_path, env_lines, header="rtsp-warden")
     log.info("Wrote %s", env_path)

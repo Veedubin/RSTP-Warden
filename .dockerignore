@@ -22,6 +22,5 @@ docs
 !README.md
 !CHANGELOG.md
 SPRINT*_PLAN.md
-rtsp_warden_master_context.md
-CONTEXT_*.md
+docs/archive/
 Archive.zip

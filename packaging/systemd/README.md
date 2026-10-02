@@ -16,7 +16,8 @@ sudo $EDITOR /etc/rtsp-warden/warden.env
 sudo cp /path/to/your/config.yaml /etc/rtsp-warden/config.yaml
 sudo $EDITOR /etc/rtsp-warden/config.yaml
 
-# 4. Enable + start
+# 4. Enable + start (first start creates the schema and an admin user;
+#    the generated password is in the journal unless WARDEN_ADMIN_PASSWORD is set)
 sudo systemctl enable --now rtsp-warden
 
 # 5. Check status
@@ -46,6 +47,6 @@ sudo packaging/systemd/uninstall.sh --purge-data # remove recordings
 | `/etc/rtsp-warden/config.yaml` | Main config |
 | `/etc/rtsp-warden/warden.env` | Environment overrides |
 | `/var/lib/rtsp-warden/recordings` | Video segments |
-| `/var/lib/rtsp-warden/data` | SQLite DB (if using SQLite) |
+| `/var/lib/rtsp-warden/data` | SQLite DB (`WARDEN_DB_URL` in `warden.env` points here) |
 | `/var/log/rtsp-warden` | Logs (also in journal) |
 | `/etc/systemd/system/rtsp-warden.service` | Service unit |

@@ -1,3 +1,5 @@
+> Archived: historical design note, superseded by CLAUDE.md and docs/superpowers/specs/. Commands and layout described here may no longer exist.
+
 # RTSP Warden — MP4 Segment Failures, Root Cause, and Plan (H.264 RTSP)
 
 ## Date / context

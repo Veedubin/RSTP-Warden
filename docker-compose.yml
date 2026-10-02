@@ -20,8 +20,14 @@ services:
       - ./recordings:/app/recordings          # persisted recordings
       - ./data:/app/data                      # SQLite DB lives here
     environment:
-      # Use SQLite for simplicity; uncomment to use Postgres
-      # WARDEN_DB_URL: postgresql://warden:warden@postgres:5432/warden
+      # SQLite in the ./data mount; switch to Postgres by replacing this URL
+      WARDEN_DB_URL: sqlite:////app/data/warden.db
+      # WARDEN_DB_URL: postgresql+psycopg2://warden:warden@postgres:5432/warden
+      # First-start admin (optional; a password is generated and logged otherwise)
+      # WARDEN_ADMIN_PASSWORD: change-me
+      # Camera credentials referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}
+      CAM_USER: ${CAM_USER:-admin}
+      CAM_PASS: ${CAM_PASS:-}
       WARDEN_WEB_HOST: 0.0.0.0
       WARDEN_WEB_PORT: 8080
       WARDEN_AUTH_ENABLED: "true"

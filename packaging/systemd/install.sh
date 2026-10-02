@@ -23,6 +23,7 @@ echo "    /etc/rtsp-warden  (mode 755, root:${SERVICE_GROUP})"
 
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /var/lib/rtsp-warden
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /var/lib/rtsp-warden/recordings
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /var/lib/rtsp-warden/data
 echo "    /var/lib/rtsp-warden  (mode 750, ${SERVICE_USER}:${SERVICE_GROUP})"
 echo "    /var/lib/rtsp-warden/recordings  (mode 750, ${SERVICE_USER}:${SERVICE_GROUP})"
 

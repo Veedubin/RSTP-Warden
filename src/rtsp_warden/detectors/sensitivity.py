@@ -28,7 +28,7 @@ def apply_sensitivity_to_confidence(sensitivity: float, default: float = 0.5) ->
     """Map 0-100 sensitivity to detection confidence threshold.
 
     sensitivity=100 -> confidence=0.1 (very lax, lots of detections)
-    sensitivity=50  -> confidence=0.55
+    sensitivity=50  -> confidence=0.5
     sensitivity=0   -> confidence=0.9 (very strict, few detections)
     """
     sens = max(0.0, min(100.0, sensitivity))

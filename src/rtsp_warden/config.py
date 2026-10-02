@@ -104,7 +104,7 @@ class RecordConfig(BaseModel):
     enabled: bool = True
 
     # Base directory; actual layout becomes:
-    #   {output_dir}/{camera}/{stream}/%Y%m%d_%H%M%S.{container}
+    #   {output_dir}/{camera}/{stream}/{camera}_{stream}_%Y%m%d_%H%M%S.{container}
     output_dir: Path = Field(default_factory=lambda: Path("./recordings"))
 
     main: StreamRecordConfig = Field(
