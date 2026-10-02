@@ -181,6 +181,12 @@ assign `app.state.config_path` / `app.state.runtime` as needed, and drive it wit
 `fastapi.testclient.TestClient`. ffmpeg tests only assert on the built argv. Detector
 tests use synthetic numpy frames.
 
+## Session docs
+
+`HANDOFF.md` (newest block first, "START HERE") and `TASKS.md` (one card per task id, `RW-n`) at the repo root
+carry session state between Claude sessions. Read the top HANDOFF block before starting work; update both at the
+end of a session (`/handoff`). Design specs and implementation plans live under `docs/superpowers/`.
+
 ## Repository notes
 
 - `SPRINT*_PLAN.md`, `Archive.zip`, `.coverage`, `recordings/`, `.env` are gitignored
