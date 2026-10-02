@@ -20,8 +20,9 @@ from .config import ClipsConfig
 
 log = logging.getLogger(__name__)
 
-# HLS segments follow the strftime pattern: %Y%m%d_%H%M%S.ts
-_SEGMENT_RE = re_compile(r"^(\d{8}_\d{6})\.ts$")
+# Recorder segments are named {camera}_{stream}_%Y%m%d_%H%M%S.ts (recorder.py).
+# A bare timestamp is accepted too, for files produced by older builds.
+_SEGMENT_RE = re_compile(r"^(?:.+_)?(\d{8}_\d{6})\.ts$")
 
 # Default segment duration in seconds when m3u8 parsing is unavailable.
 _DEFAULT_SEGMENT_DURATION = 4.0
@@ -69,7 +70,7 @@ class ClipGenerator:
     ) -> list[Path]:
         """Find HLS .ts segment files whose timestamps overlap [start_time, end_time].
 
-        Segments are named %Y%m%d_%H%M%S.ts. We parse the filename to get
+        Segments are named {camera}_{stream}_%Y%m%d_%H%M%S.ts. We parse the filename to get
         the segment start time, then check overlap with the requested window.
         Each segment extends for segment_duration seconds.
 
