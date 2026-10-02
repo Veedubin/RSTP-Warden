@@ -8,6 +8,7 @@ recordings, events, and health endpoints.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +43,8 @@ def create_app(
     settings: WebSettings | None = None,
     cfg: AppConfig | None = None,
     runtime_provider: RuntimeProvider | None = None,
+    config_path: str | Path | None = None,
+    runtime: object | None = None,
 ) -> FastAPI:
     """Build and return a configured FastAPI application.
 
@@ -55,6 +58,11 @@ def create_app(
     runtime_provider:
         Optional callable returning the live ``AppRuntime`` instance.
         When provided, the dashboard can list camera names dynamically.
+    config_path:
+        Path of the YAML file the config was loaded from. Routes that edit
+        camera settings write back to it. None means in-memory only.
+    runtime:
+        The live ``AppRuntime``. Routes that hot-reload detectors need it.
     """
     if settings is None:
         settings = WebSettings()
@@ -69,6 +77,8 @@ def create_app(
     # --- Application state ---
     app.state.cfg = cfg
     app.state.runtime_provider = runtime_provider or (lambda: None)
+    app.state.config_path = str(config_path) if config_path is not None else None
+    app.state.runtime = runtime
 
     # --- AlertManager (lazy init — populated when cfg is set or runtime starts) ---
     from ..alerts.manager import AlertManager

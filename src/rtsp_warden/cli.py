@@ -496,7 +496,13 @@ def serve(
         if not _port_is_free(web_host, web_port):
             raise typer.Exit(code=2)
         web_settings = WebSettings(host=web_host, port=web_port)
-        ws = WebUIServer(settings=web_settings, cfg=cfg, runtime_provider=lambda: rt)
+        ws = WebUIServer(
+            settings=web_settings,
+            cfg=cfg,
+            runtime_provider=lambda: rt,
+            config_path=config,
+            runtime=rt,
+        )
         ws.start()
         console.print(f"Web UI: {ws.url}")
         console.print(f"  Health: {ws.url}/healthz, {ws.url}/status.json, {ws.url}/metrics")

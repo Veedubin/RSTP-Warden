@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 
 import uvicorn
 
@@ -37,11 +38,19 @@ class WebUIServer:
         settings: WebSettings,
         runtime_provider: RuntimeProvider,
         cfg: AppConfig | None = None,
+        config_path: str | Path | None = None,
+        runtime: object | None = None,
     ) -> None:
         self._settings = settings
         self._runtime_provider = runtime_provider
         self._cfg = cfg
-        self._app = create_app(settings, cfg=cfg, runtime_provider=runtime_provider)
+        self._app = create_app(
+            settings,
+            cfg=cfg,
+            runtime_provider=runtime_provider,
+            config_path=config_path,
+            runtime=runtime,
+        )
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
 
