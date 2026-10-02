@@ -109,6 +109,16 @@ def _load_dotenv(path: Path = Path(".env")) -> None:
             os.environ[key] = value
 
 
+def _resolve_web_settings(host: str | None, port: int | None) -> WebSettings:
+    """CLI flags override WARDEN_WEB_HOST / WARDEN_WEB_PORT, which override defaults."""
+    settings = WebSettings()
+    if host:
+        settings.host = host
+    if port:
+        settings.port = port
+    return settings
+
+
 def _port_is_free(host: str, port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -389,7 +399,7 @@ def install(
 
     console.print()
     console.print(f"[green]✓[/green] Database: {result.db_backend} at {result.db_url}")
-    console.print("[green]✓[/green] Schema created (7 tables)")
+    console.print("[green]✓[/green] Schema created")
     console.print("[green]✓[/green] Admin user created")
     console.print()
     console.print("─" * 60)
@@ -402,7 +412,7 @@ def install(
     console.print("[bold]Next steps:[/bold]")
     console.print("  rtsp-warden init-config")
     console.print("  rtsp-warden doctor -c config.yaml")
-    console.print("  rtsp-warden run -c config.yaml")
+    console.print("  rtsp-warden serve -c config.yaml")
     console.print()
 
 
@@ -470,19 +480,24 @@ def serve(
     web: bool = typer.Option(
         True, "--web/--no-web", help="Enable web UI (includes /healthz, /status.json, /metrics)"
     ),
-    web_host: str = typer.Option("127.0.0.1", "--web-host", help="Web UI bind host"),
-    web_port: int = typer.Option(
-        8080, "--web-port", help="Web UI port (health endpoints are served here too)"
+    web_host: str | None = typer.Option(
+        None, "--web-host", help="Web UI bind host (default: $WARDEN_WEB_HOST or 127.0.0.1)"
+    ),
+    web_port: int | None = typer.Option(
+        None, "--web-port", help="Web UI port (default: $WARDEN_WEB_PORT or 8080)"
     ),
 ) -> None:
     """Run the supervisor: recording + proxying + web UI + health endpoints.
 
-    The web UI (FastAPI) absorbs the standalone health server from v0.3.0.
-    Health endpoints /healthz, /status.json, and /metrics are now served
-    on the same port as the web UI.
+    On first start this creates the database schema and, when no users exist,
+    an admin user (credentials from WARDEN_ADMIN_USERNAME / WARDEN_ADMIN_PASSWORD,
+    or a generated password printed to the log).
     """
+    from .db.bootstrap import bootstrap_database
+
     _load_dotenv()
     setup_logging(verbosity=verbosity)  # type: ignore[arg-type]
+    bootstrap_database()
     cfg = _load_cfg(config)
     _require_binaries(cfg)
 
@@ -493,9 +508,9 @@ def serve(
 
     ws: WebUIServer | None = None
     if web:
-        if not _port_is_free(web_host, web_port):
+        web_settings = _resolve_web_settings(web_host, web_port)
+        if not _port_is_free(web_settings.host, web_settings.port):
             raise typer.Exit(code=2)
-        web_settings = WebSettings(host=web_host, port=web_port)
         ws = WebUIServer(
             settings=web_settings,
             cfg=cfg,

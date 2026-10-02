@@ -236,7 +236,7 @@ def run_install(
     # so SQLAlchemy picks up the target database URL
     reset_engine()
     ensure_schema()
-    log.info("Schema created (7 tables)")
+    log.info("Schema created")
 
     # 7. Create admin user
     create_admin_user(admin_username, hash_password(admin_password))

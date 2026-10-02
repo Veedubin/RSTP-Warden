@@ -15,7 +15,6 @@ class WebSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="WARDEN_WEB_", extra="ignore")
 
     enabled: bool = True
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # set WARDEN_WEB_HOST=0.0.0.0 to expose beyond localhost
     port: int = 8080
     log_level: str = "info"
-    # Future: auth settings, recording_root, etc.

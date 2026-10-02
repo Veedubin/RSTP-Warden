@@ -11,7 +11,6 @@ Group=rtsp-warden
 WorkingDirectory=/var/lib/rtsp-warden
 
 ExecStart=/usr/local/bin/rtsp-warden serve -c /etc/rtsp-warden/config.yaml --web --web-port 8080
-ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=on-failure
 RestartSec=5
