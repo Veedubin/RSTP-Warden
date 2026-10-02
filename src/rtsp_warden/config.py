@@ -1,12 +1,44 @@
 from __future__ import annotations
 
+import os
+import re
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .detectors.registry import DetectorSpec
+
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_env(obj: Any, env: Mapping[str, str] | None = None) -> Any:
+    """Replace ``${NAME}`` references in every string of a loaded YAML tree.
+
+    Only the exact ``${NAME}`` form is replaced; a bare ``$`` or ``$NAME`` is
+    left alone so passwords containing ``$`` survive. A reference to a
+    variable that is not set is a fatal config error.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1)
+        if name not in source:
+            raise SystemExit(
+                f"Config references ${{{name}}} but the environment variable {name} is not set"
+            )
+        return source[name]
+
+    if isinstance(obj, str):
+        return _ENV_REF.sub(_sub, obj)
+    if isinstance(obj, list):
+        return [expand_env(v, source) for v in obj]
+    if isinstance(obj, dict):
+        return {k: expand_env(v, source) for k, v in obj.items()}
+    return obj
+
 
 RtspTransport = Literal["tcp", "udp"]
 Container = Literal[
@@ -568,6 +600,7 @@ class AppConfig(BaseModel):
 def load_config(path: str | Path) -> AppConfig:
     p = Path(path)
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    raw = expand_env(raw)
     try:
         return AppConfig.model_validate(raw)
     except ValidationError as e:

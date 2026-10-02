@@ -1,7 +1,11 @@
+# Credentials come from environment variables (see .env):
+#   CAM_USER=admin
+#   CAM_PASS=your-camera-password
+# rtsp-warden expands ${NAME} references in config.yaml at load time.
 cameras:
   - name: front
-    main_url: "rtsp://admin:admin@192.168.1.72:5554/videoMain"
-    sub_url: "rtsp://admin:admin@192.168.1.72:5554/videoSub"
+    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:5554/videoMain"
+    sub_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:5554/videoSub"
 
     record:
       enabled: true
