@@ -624,7 +624,7 @@ async def save_camera_sensitivity(
     # Persist to config.yaml
     config_path = _get_config_path(request)
     if config_path is not None:
-        _persist_camera_field(config_path, cfg, "sensitivity", cam_config.sensitivity)
+        _persist_camera_field(config_path, name, "sensitivity", cam_config.sensitivity)
 
     # Handle "save and reload" action
     action = form.get("action")
@@ -699,7 +699,7 @@ async def save_camera_detection_classes(
     # Persist to config.yaml
     config_path = _get_config_path(request)
     if config_path is not None:
-        _persist_camera_field(config_path, cfg, "detect_classes", cam_config.detect_classes)
+        _persist_camera_field(config_path, name, "detect_classes", cam_config.detect_classes)
 
     # Handle "save and reload" action
     action = form.get("action")
@@ -810,29 +810,22 @@ def _persist_camera_retention(config_path: Path, cfg: AppConfig) -> None:
 
 
 def _persist_camera_field(
-    config_path: Path, cfg: AppConfig, field_name: str, value: object
+    config_path: Path, camera_name: str, field_name: str, value: object
 ) -> None:
-    """Persist a single camera-level field to config.yaml.
-
-    Updates only the specified field for each camera, preserving all
-    other fields in the file.
+    """Persist one camera-level field for one camera to config.yaml.
 
     Args:
         config_path: Path to config.yaml.
-        cfg: Current AppConfig (source of truth in memory).
+        camera_name: The camera whose field changed.
         field_name: Field name on CameraConfig to persist.
         value: Value to write for the field.
     """
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     cameras_data = data.get("cameras", [])
     for cam_dict in cameras_data:
-        cam_name = cam_dict.get("name")
-        if cam_name is None:
-            continue
-        for cam_cfg in cfg.cameras:
-            if cam_cfg.name == cam_name:
-                cam_dict[field_name] = value
-                break
+        if cam_dict.get("name") == camera_name:
+            cam_dict[field_name] = value
+            break
     data["cameras"] = cameras_data
     _locked_write_yaml(config_path, data)
 
