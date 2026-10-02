@@ -12,19 +12,43 @@ from ..auth import CurrentUser
 from .auth_bridge import get_current_user_from_request
 
 
+class LoginRequired(Exception):
+    """Raised for browser requests with no session; handled by a redirect to /login."""
+
+    def __init__(self, next_url: str) -> None:
+        super().__init__(next_url)
+        self.next_url = next_url
+
+
 async def get_current_user(request: Request) -> CurrentUser | None:
     """Resolve the current user from the request, or return None."""
     return get_current_user_from_request(request)
 
 
+def _wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept
+
+
 async def require_user(
+    request: Request,
     user: CurrentUser | None = Depends(get_current_user),
 ) -> CurrentUser:
-    """Dependency that requires an authenticated user.
+    """Require an authenticated user.
 
-    Raises 401 if no valid session or bearer token is present.
+    Browser page loads are redirected to /login. htmx partial requests get a
+    401 with an ``HX-Redirect`` header so htmx navigates the whole page.
+    Everything else gets a plain 401.
     """
     if user is None:
+        if request.headers.get("hx-request") == "true":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"HX-Redirect": "/login"},
+            )
+        if _wants_html(request):
+            raise LoginRequired(next_url=request.url.path)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",

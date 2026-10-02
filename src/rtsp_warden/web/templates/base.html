@@ -39,9 +39,7 @@
       <li>
         <details>
           <summary>{{ user.username }}</summary>
-          <form method="POST" action="/logout"
-                hx-post="/logout"
-                hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+          <form method="POST" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
             <button type="submit" class="secondary outline">Log out</button>
           </form>

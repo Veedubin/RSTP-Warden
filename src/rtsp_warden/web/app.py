@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..config import AppConfig
+from .auth_depends import LoginRequired
 from .config import WebSettings
 from .paths import STATIC_DIR
 from .routes.alerts import router as alerts_router
@@ -90,6 +93,10 @@ def create_app(
 
     # --- Security middleware (CSRF + context) ---
     install_security(app)
+
+    @app.exception_handler(LoginRequired)
+    async def _login_required(request: Request, exc: LoginRequired) -> RedirectResponse:
+        return RedirectResponse(url=f"/login?next={quote(exc.next_url, safe='/')}", status_code=303)
 
     # --- Static files ---
     app.mount(
