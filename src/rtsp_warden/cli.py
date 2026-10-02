@@ -21,7 +21,6 @@ from .logging_utils import setup_logging
 from .status_model import redact_rtsp_url
 from .web.config import WebSettings
 from .web.server import WebUIServer
-from .web_ui import PreviewTarget, WebUiServer
 
 app = typer.Typer(add_completion=False, help="rtsp-warden: record RTSP streams + proxy locally")
 console = Console()
@@ -531,101 +530,6 @@ def serve(
         rt.stop_all()
         if ws is not None:
             ws.stop()
-
-
-# Deprecated alias for the v0.3.0 `run` command.
-# Hidden from --help but still works for backward compatibility.
-@app.command(name="run", hidden=True, deprecated=True)
-def run_command(  # noqa: ARG001
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, help="Path to YAML config"
-    ),
-    verbosity: str = typer.Option(
-        "info", "--verbosity", "-v", help="Logging verbosity: error|warning|info|debug"
-    ),
-    health: bool = typer.Option(
-        True,
-        "--health/--no-health",
-        help="[DEPRECATED] Health endpoints are now part of the web UI.",
-    ),
-    health_host: str = typer.Option(
-        "127.0.0.1", "--health-host", help="[DEPRECATED] Use --web-host instead."
-    ),
-    health_port: int = typer.Option(
-        8899, "--health-port", help="[DEPRECATED] Use --web-port instead."
-    ),
-    frame_consumer: list[str] = typer.Option(
-        [],
-        "--frame-consumer",
-        help="Enable frame tap consumers. Use 'motion-demo' or 'module:ClassName'. Can be repeated.",
-    ),
-    web: bool = typer.Option(True, "--web/--no-web", help="Enable web UI"),
-    web_host: str = typer.Option("127.0.0.1", "--web-host", help="Web UI bind host"),
-    web_port: int = typer.Option(8080, "--web-port", help="Web UI port"),
-) -> None:
-    """[DEPRECATED] Use `serve` instead. The health server has been absorbed into the web UI."""
-    console.print(
-        "[yellow]Warning:[/yellow] `rtsp-warden run` is deprecated. Use `rtsp-warden serve` instead."
-    )
-    console.print("  The standalone health server has been absorbed into the web UI.")
-    console.print("  --health, --health-host, --health-port are ignored.")
-    console.print()
-    # Forward to serve
-    serve(
-        config=config,
-        verbosity=verbosity,
-        frame_consumer=frame_consumer,
-        web=web,
-        web_host=web_host,
-        web_port=web_port,
-    )
-
-
-@app.command()
-def ui(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, help="Path to YAML config"
-    ),
-    bind_host: str = typer.Option("127.0.0.1", "--host", help="Web UI bind host"),
-    port: int = typer.Option(8080, "--port", help="Web UI port"),
-    embed_host: str = typer.Option(
-        "127.0.0.1",
-        "--embed-host",
-        help="Host to use when building MJPEG URLs (usually where rtsp-warden is running)",
-    ),
-    title: str = typer.Option("RTSP Warden — Live Previews", "--title", help="Page title"),
-) -> None:
-    """Start the minimal MJPEG grid web UI.
-
-    Note: this UI only embeds existing MJPEG endpoints. Run `rtsp-warden run ...` separately.
-    """
-    cfg = _load_cfg(config)
-
-    targets: list[PreviewTarget] = []
-    for cam in cfg.cameras:
-        if not cam.proxy.enabled or cam.proxy.mode != "mjpeg":
-            continue
-        p = int(cam.proxy.port)
-        targets.append(
-            PreviewTarget(
-                camera=cam.name,
-                label=str(cam.proxy.stream),
-                mjpeg_url=f"http://{embed_host}:{p}/mjpeg",
-                snapshot_url=f"http://{embed_host}:{p}/snapshot.jpg",
-                health_url=f"http://{embed_host}:{p}/healthz",
-            )
-        )
-
-    if not targets:
-        console.print("No MJPEG proxies found in config (proxy.mode must be 'mjpeg').")
-        raise typer.Exit(code=2)
-
-    if not _port_is_free(bind_host, port):
-        raise typer.Exit(code=2)
-
-    ui_server = WebUiServer(targets=targets, bind_host=bind_host, port=int(port), title=title)
-    console.print(f"Web UI: {ui_server.url()}")
-    ui_server.serve_forever()
 
 
 @app.command()

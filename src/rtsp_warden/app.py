@@ -483,13 +483,3 @@ class AppRuntime:
 
         self.console.clear()
         self.console.print(table)
-
-
-def run_app(cfg: AppConfig) -> None:
-    rt = AppRuntime(cfg=cfg)
-    rt.build()
-    rt.start()
-    try:
-        rt.run_forever()
-    finally:
-        rt.stop_all()

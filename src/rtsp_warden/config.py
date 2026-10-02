@@ -497,48 +497,6 @@ class OnvifConfig(BaseModel):
         return v
 
 
-class DNNDetectorConfig(BaseModel):
-    """Configuration for the YOLOv4-tiny DNN detector.
-
-    This config type is used within DetectorSpec.config when
-    type="dnn". It provides typed defaults and validation for
-    the DNN detector parameters.
-
-    Fields:
-        type: Detector type discriminator, always "dnn".
-        model: Pretrained model name. Currently only "yolov4-tiny" is
-            supported. Determines which .cfg and .weights files are used.
-        confidence: Minimum confidence threshold (0.0-1.0). Detections
-            below this threshold are discarded.
-        nms_threshold: Non-maximum suppression threshold (0.0-1.0).
-            Higher values keep more overlapping detections.
-        classes: List of COCO class names to detect. When None, defaults
-            to vehicle + animal classes (car, truck, bus, motorcycle,
-            bicycle, bird, cat, dog, horse, sheep, cow, elephant, bear,
-            zebra, giraffe).
-    """
-
-    type: Literal["dnn"] = "dnn"
-    model: str = "yolov4-tiny"
-    confidence: float = 0.5
-    nms_threshold: float = 0.4
-    classes: list[str] | None = None
-
-    @field_validator("confidence")
-    @classmethod
-    def _confidence_range(cls, v: float) -> float:
-        if not 0.0 < v <= 1.0:
-            raise ValueError("confidence must be in (0.0, 1.0]")
-        return v
-
-    @field_validator("nms_threshold")
-    @classmethod
-    def _nms_range(cls, v: float) -> float:
-        if not 0.0 < v <= 1.0:
-            raise ValueError("nms_threshold must be in (0.0, 1.0]")
-        return v
-
-
 class RuntimeConfig(BaseModel):
     ffmpeg_path: str = "ffmpeg"
     mediamtx_path: str = "mediamtx"

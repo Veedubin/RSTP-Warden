@@ -376,56 +376,6 @@ def build_ffmpeg_segment_cmd(
     return cmd
 
 
-def build_ffmpeg_mjpeg_stdout_cmd(
-    *,
-    ffmpeg_path: str,
-    rtsp_url: str,
-    rtsp_transport: str,
-    fps: int,
-    scale_width: int,
-    loglevel: str = "warning",
-    analyzeduration_us: int = 30_000_000,
-    probesize: int = 50_000_000,
-) -> list[str]:
-    """Build an ffmpeg command that outputs a MJPEG stream to stdout."""
-    rtsp_url = normalize_rtsp_url(rtsp_url)
-    ad, ps = _sanitize_probe_values(analyzeduration_us, probesize)
-
-    cmd = [
-        ffmpeg_path,
-        "-nostdin",
-        "-hide_banner",
-        "-loglevel",
-        loglevel,
-        "-analyzeduration",
-        str(int(ad)),
-        "-probesize",
-        str(int(ps)),
-        "-fflags",
-        "+genpts+igndts",
-        "-use_wallclock_as_timestamps",
-        "1",
-        "-rtsp_transport",
-        rtsp_transport,
-        "-i",
-        rtsp_url,
-        "-an",
-    ]
-    if scale_width and scale_width > 0:
-        cmd += ["-vf", f"scale={scale_width}:-1"]
-
-    cmd += [
-        "-fps_mode",
-        "cfr",
-        "-r",
-        str(int(fps)),
-        "-f",
-        "mjpeg",
-        "pipe:1",
-    ]
-    return cmd
-
-
 def build_ffmpeg_ingest_cmd(
     *,
     ffmpeg_path: str,

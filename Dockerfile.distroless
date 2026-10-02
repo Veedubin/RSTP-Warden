@@ -6,7 +6,7 @@
 #
 # Architecture:
 #   1/4 builder      — python:3.13-slim + uv → builds .venv, provides Python 3.13 runtime
-#   2/4 deps         — debian:13-slim → installs ALL runtime deps (ffmpeg, opencv, zeep)
+#   2/4 deps         — debian:13-slim → installs ALL runtime deps (ffmpeg, opencv)
 #                      Then uses ldd + a script to copy ONLY the needed .so files to /dist
 #   3/4 (merged into stage 2 — single deps collector stage)
 #   4/4 runtime      — gcr.io/distroless/cc-debian13:nonroot → minimal runtime
@@ -23,7 +23,7 @@
 # ===========================================================================
 FROM python:3.13-slim AS builder
 
-# Install build deps (gcc for psycopg2, libxml2/libxslt for zeep)
+# Install build deps (gcc for psycopg2, libxml2/libxslt for lxml-based deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \

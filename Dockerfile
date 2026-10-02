@@ -10,7 +10,7 @@
 # ---- Stage 1: builder ----
 FROM python:3.13-slim AS builder
 
-# Install build deps (gcc for psycopg2, libxml2/libxslt for zeep)
+# Install build deps (gcc for psycopg2, libxml2/libxslt for lxml-based deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
