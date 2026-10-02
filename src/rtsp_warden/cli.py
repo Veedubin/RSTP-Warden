@@ -50,11 +50,11 @@ SAMPLE_CONFIG_YAML = """cameras:
         chunk_seconds: 300
         rtsp_transport: tcp
 
-      retention:
-        max_days: 7
-        max_gb: 50
-        keep_last_n: 10
-        cleanup_interval_seconds: 300
+    retention:
+      max_days: 7
+      max_gb: 50
+      keep_last_n: 10
+      cleanup_interval_seconds: 300
 
     proxy:
       enabled: true

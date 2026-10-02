@@ -11,25 +11,23 @@ cameras:
       enabled: true
       output_dir: ./recordings
 
-      # Main stream: prefer MKV container for resilience (remux / copy; no re-encode).
       main:
         enabled: true
-        container: mkv
+        container: ts
         chunk_seconds: 300
         rtsp_transport: tcp
 
-      # Sub stream: MP4 is often convenient for general playback tooling.
       sub:
         enabled: true
-        container: mkv
+        container: ts
         chunk_seconds: 300
         rtsp_transport: tcp
 
-      retention:
-        max_days: 7
-        max_gb: 50
-        keep_last_n: 10
-        cleanup_interval_seconds: 300
+    retention:
+      max_days: 7
+      max_gb: 50
+      keep_last_n: 10
+      cleanup_interval_seconds: 300
 
     proxy:
       enabled: true
