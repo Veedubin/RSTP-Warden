@@ -124,7 +124,7 @@
 .status-running { color: #2e7d32; }
 .status-restarting { color: #b26a00; }
 .status-failed { color: #c62828; }
-.status-idle, .status-unknown { color: var(--pico-muted-color, #777); }
+.status-idle, .status-unknown, .status-waiting { color: var(--pico-muted-color, #777); }
 .status-dot.status-running { background: #2e7d32; }
 .status-dot.status-restarting { background: #b26a00; }
 .status-dot.status-failed { background: #c62828; }

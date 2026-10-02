@@ -33,9 +33,15 @@ def ensure_admin_user(env: Mapping[str, str] | None = None) -> tuple[str, str] |
     return username, password
 
 
-def bootstrap_database() -> tuple[str, str] | None:
-    """Ensure the schema exists and an admin user exists. Logs created credentials once."""
+def bootstrap_database(create_admin: bool = True) -> tuple[str, str] | None:
+    """Ensure the schema exists and, when *create_admin*, an admin user exists.
+
+    Logs created credentials once. Pass ``create_admin=False`` when the web UI is
+    disabled, since a login nobody can use should not be generated.
+    """
     ensure_schema()
+    if not create_admin:
+        return None
     created = ensure_admin_user()
     if created is not None:
         username, password = created

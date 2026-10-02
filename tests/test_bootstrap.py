@@ -22,3 +22,10 @@ def test_generates_password_when_env_absent(clean_db):
 
 def test_noop_when_users_exist(db_with_user):
     assert ensure_admin_user({}) is None
+
+
+def test_bootstrap_database_can_skip_admin_creation(clean_db):
+    from rtsp_warden.db.bootstrap import bootstrap_database
+
+    assert bootstrap_database(create_admin=False) is None
+    assert list_users() == []

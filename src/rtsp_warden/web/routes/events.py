@@ -52,6 +52,23 @@ def _get_clip_generator(request: Request) -> ClipGenerator | None:
     )
 
 
+def clip_stream_and_chunk(cfg: AppConfig | None, camera_name: str) -> tuple[str, float]:
+    """Pick the stream to cut clips from and its segment length.
+
+    The sub stream is smaller, so it is preferred when the camera has one and
+    records it; otherwise the main stream. Falls back to main / 300s when the
+    camera is unknown.
+    """
+    cam = None
+    if cfg is not None:
+        cam = next((c for c in cfg.cameras if c.name == camera_name), None)
+    if cam is None:
+        return "main", 300.0
+    if cam.sub_url and cam.record.sub.enabled:
+        return "sub", float(cam.record.sub.chunk_seconds)
+    return "main", float(cam.record.main.chunk_seconds)
+
+
 @router.get("", response_class=HTMLResponse)
 async def events_list(
     request: Request,
@@ -191,8 +208,9 @@ async def generate_clip(
     )
     camera_id = evt.get("camera_id") if isinstance(evt, dict) else getattr(evt, "camera_id", None)
 
-    # Use "sub" stream for clips (lower quality, smaller files)
-    stream = "sub"
+    stream, chunk_seconds = clip_stream_and_chunk(
+        getattr(request.app.state, "cfg", None), camera_name
+    )
 
     # Create a pending clip record
     clip = create_clip(
@@ -207,6 +225,7 @@ async def generate_clip(
         output_path = gen.generate(
             camera_name=camera_name,
             stream=stream,
+            segment_duration=chunk_seconds,
             event_start=event_time,
             event_id=event_id,
         )

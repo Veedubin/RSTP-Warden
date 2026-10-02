@@ -26,3 +26,12 @@ def test_list_cameras_handles_missing_sub():
     row = list_cameras(cfg)[0]
     assert row["sub_url_redacted"] is None
     assert row["main_url_redacted"].startswith("rtsp://***")
+
+
+def test_recorder_builds_main_for_proxy_only_camera():
+    cam = CameraConfig(
+        name="c", main_url="rtsp://h/m", record={"enabled": False}, proxy={"enabled": True}
+    )
+    rec = CameraRecorder(camera=cam, runtime=RuntimeConfig())
+    assert rec.main is not None
+    assert rec.has_any()

@@ -48,7 +48,10 @@ async def require_user(
                 headers={"HX-Redirect": "/login"},
             )
         if _wants_html(request):
-            raise LoginRequired(next_url=request.url.path)
+            next_url = request.url.path
+            if request.url.query:
+                next_url += "?" + request.url.query
+            raise LoginRequired(next_url=next_url)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",

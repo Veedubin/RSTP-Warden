@@ -140,7 +140,7 @@ retention:      # global fallback retention (v1.2.0+; per-camera overrides suppo
 cameras:
   - name: front_door                       # required, unique
     main_url: rtsp://user:pass@host:554/... # required
-    sub_url:  rtsp://user:pass@host:554/... # optional; proxy, frame tap and sub recording fall back to main
+    sub_url:  rtsp://user:pass@host:554/... # optional; proxy and frame tap fall back to main, sub recording is skipped
     # Credentials can come from the environment: rtsp://${CAM_USER}:${CAM_PASS}@host:554/...
 
     record:
@@ -353,7 +353,7 @@ The detector framework runs on a chain of `FrameConsumer` objects that receive J
 - `enabled` per detector — toggle individual detectors on/off without deleting config.
 - **Zones** — grid-based (N×M cells, block specific cells to ignore that area) or polygon ROI. AND semantics: a detection must pass the polygon ROI AND not be in a blocked grid cell.
 
-**Hot reload:** saving `sensitivity`, `detect_classes`, `zones` or a detector `enabled` flag in the web UI writes `config.yaml` and rebuilds that camera's detectors immediately. `POST /cameras/{name}/reload` rebuilds from the in-memory config; it does not re-read the YAML, so hand edits still need a restart.
+**Hot reload:** web UI saves write `config.yaml`. A detector `enabled` toggle rebuilds that camera's detectors at once; sensitivity and detection classes rebuild when saved with "Save and reload"; zones rebuild from the zones page's reload button. `POST /cameras/{name}/reload` rebuilds from the in-memory config; it does not re-read the YAML, so hand edits still need a restart.
 
 ### Alerts
 

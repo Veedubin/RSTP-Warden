@@ -95,9 +95,8 @@ class ClipGenerator:
             if not m:
                 continue
             try:
-                seg_start = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(
-                    tzinfo=timezone.utc
-                )
+                # ffmpeg's -strftime names segments in the process's local time zone.
+                seg_start = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").astimezone()
             except ValueError:
                 continue
 
@@ -211,6 +210,7 @@ class ClipGenerator:
         event_id: int,
         pre_seconds: float | None = None,
         post_seconds: float | None = None,
+        segment_duration: float | None = None,
     ) -> Path:
         """Generate an MP4 clip for an event.
 
@@ -221,6 +221,7 @@ class ClipGenerator:
             event_id: Event ID (used in output filename).
             pre_seconds: Seconds before event to include (default from config).
             post_seconds: Seconds after event to include (default from config).
+            segment_duration: Length of the recorder's segments (record.<stream>.chunk_seconds).
 
         Returns:
             Path to the generated clip file.
@@ -241,7 +242,13 @@ class ClipGenerator:
             end_time = start_time + __import__("datetime").timedelta(seconds=max_dur)
 
         # Find overlapping segments
-        segments = self.find_segments(camera_name, stream, start_time, end_time)
+        segments = self.find_segments(
+            camera_name,
+            stream,
+            start_time,
+            end_time,
+            segment_duration=segment_duration or _DEFAULT_SEGMENT_DURATION,
+        )
         if not segments:
             raise ClipError(
                 f"No HLS segments found for camera={camera_name} stream={stream} "

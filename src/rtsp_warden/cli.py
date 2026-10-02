@@ -90,8 +90,25 @@ def _load_cfg(config: Path) -> AppConfig:
     return load_config(config)
 
 
+def _parse_dotenv_value(raw: str) -> str:
+    """Return the value part of a .env line: quoted strings verbatim, else up to a ' #' comment."""
+    raw = raw.strip()
+    if raw[:1] in ("'", '"'):
+        quote = raw[0]
+        end = raw.find(quote, 1)
+        return raw[1:end] if end != -1 else raw[1:]
+    for marker in (" #", "\t#"):
+        if marker in raw:
+            raw = raw.split(marker, 1)[0]
+    return raw.strip()
+
+
 def _load_dotenv(path: Path = Path(".env")) -> None:
-    """Parse a simple KEY="VALUE" .env file and set env vars. No python-dotenv dep."""
+    """Parse a simple KEY="VALUE" .env file and set env vars. No python-dotenv dep.
+
+    Trailing ``# comments`` after a value are ignored, matching what shells and
+    systemd users expect.
+    """
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -102,7 +119,7 @@ def _load_dotenv(path: Path = Path(".env")) -> None:
             continue
         key, _, value = stripped.partition("=")
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
+        value = _parse_dotenv_value(value)
         # Only set if not already defined in environment (env vars take precedence)
         if key and key not in os.environ:
             os.environ[key] = value
@@ -422,6 +439,7 @@ def doctor(
     ),
 ) -> None:
     """Validate config + check binaries + check proxy ports are available."""
+    _load_dotenv()
     cfg = _load_cfg(config)
 
     table = Table(title="rtsp-warden doctor")
@@ -496,9 +514,10 @@ def serve(
 
     _load_dotenv()
     setup_logging(verbosity=verbosity)  # type: ignore[arg-type]
-    bootstrap_database()
     cfg = _load_cfg(config)
     _require_binaries(cfg)
+    # Only after the config is known good; an admin user is only useful with the web UI.
+    bootstrap_database(create_admin=web)
 
     # Build a single dispatcher and let the ingest layer feed it (no monkey-patching).
     dispatcher = _build_frame_tap_dispatcher(frame_consumer)
@@ -509,6 +528,10 @@ def serve(
     if web:
         web_settings = _resolve_web_settings(web_host, web_port)
         if not _port_is_free(web_settings.host, web_settings.port):
+            console.print(
+                f"[red]✗[/red] Cannot bind the web UI to {web_settings.host}:{web_settings.port} "
+                "(port in use, or host not an address of this machine)."
+            )
             raise typer.Exit(code=2)
         ws = WebUIServer(
             settings=web_settings,
@@ -544,6 +567,7 @@ def status(
     ),
 ) -> None:
     """Print a single JSON status snapshot to stdout."""
+    _load_dotenv()
     cfg = _load_cfg(config)
     rt = AppRuntime(cfg=cfg)
     rt.build()

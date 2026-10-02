@@ -37,6 +37,15 @@ def _is_https() -> bool:
     return os.getenv("WARDEN_HTTPS", "false").lower() in ("true", "1", "yes")
 
 
+def _safe_next(value: str | None) -> str:
+    """Only allow same-site paths as a post-login destination (no open redirect)."""
+    if not value:
+        return "/"
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return "/"
+    return value
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
     """Render the login form.
@@ -50,11 +59,10 @@ async def login_page(request: Request) -> HTMLResponse:
     # Check if already authenticated
     current_user = get_current_user_from_request(request)
     if current_user is not None:
-        next_url = request.query_params.get("next", "/")
-        return RedirectResponse(url=next_url, status_code=303)
+        return RedirectResponse(url=_safe_next(request.query_params.get("next")), status_code=303)
 
     csrf_token = getattr(request.state, "csrf_token", "")
-    next_url = request.query_params.get("next", "/")
+    next_url = _safe_next(request.query_params.get("next"))
 
     return _templates.TemplateResponse(
         request,
@@ -123,7 +131,7 @@ async def login_submit(
     now = datetime.now(timezone.utc)
     max_age = int((auth_session.expires_at - now).total_seconds())
 
-    response = RedirectResponse(url=next, status_code=303)
+    response = RedirectResponse(url=_safe_next(next), status_code=303)
     response.set_cookie(
         key=auth.SESSION_COOKIE_NAME,
         value=auth_session.token,

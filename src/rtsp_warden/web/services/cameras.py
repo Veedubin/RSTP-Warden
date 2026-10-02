@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 def live_status(cam_rt: Any, now: float | None = None) -> dict[str, Any]:
     """Summarize a CameraRuntime for display.
 
-    status: running | restarting | failed | idle
+    status: running | restarting | failed | idle | waiting (event mode, no detection yet)
     """
     now = time.time() if now is None else now
     recorder = getattr(cam_rt, "recorder", None)
@@ -34,8 +34,14 @@ def live_status(cam_rt: Any, now: float | None = None) -> dict[str, Any]:
         except Exception:
             last_frame_age = None
 
+    # Event-mode recorders keep their ingestors stopped until a detection arrives.
+    record_mode = getattr(getattr(getattr(recorder, "camera", None), "record", None), "mode", None)
+    event_waiting = record_mode == "event" and not getattr(recorder, "_event_recording", False)
+
     if not procs:
         status = "idle"
+    elif event_waiting:
+        status = "waiting"
     else:
         any_dead = any(sp.proc is None or sp.proc.poll() is not None for sp in procs)
         if not any_dead:

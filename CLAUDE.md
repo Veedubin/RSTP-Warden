@@ -39,7 +39,7 @@ uv run rtsp-warden doctor -c config.yaml
 uv run rtsp-warden serve -c config.yaml --web --web-port 8080
 ```
 
-The CLI loads `.env` from the current working directory. `serve` runs `ensure_schema()`
+`serve`, `doctor` and `status` load `.env` from the current working directory. `serve` runs `ensure_schema()`
 and creates the first admin user when the users table is empty (`db/bootstrap.py`),
 so `install` is optional. `config.yaml` strings may reference `${ENV_VAR}`; a missing
 variable is a startup error. The `run` alias and the stdlib `ui` grid were removed.
@@ -92,8 +92,7 @@ FrameTapDispatcher → DetectorRunner.on_frame (one runner per camera; bounded q
 ```
 
 The real `Detector` protocol (`detectors/base.py`) is `name`, `kind`, `setup()`,
-`process(frame_bgr, ts_unix) -> list[Detection]`, `teardown()`. The README's
-`detect(frame)` wording is wrong. `DetectorType` is the literal
+`process(frame_bgr, ts_unix) -> list[Detection]`, `teardown()`. `DetectorType` is the literal
 `motion | person | vehicle | dnn | custom`; builtins are lazily imported by
 `detectors/registry.py`. `build_detectors_for_camera` is the single entry point that
 applies camera-level `sensitivity` (`detectors/sensitivity.py`) and `detect_classes`
@@ -161,7 +160,7 @@ notifiers in `__init__`; it is used by the `/alerts` admin routes (list, edit, a
 sub-project 3 in `docs/superpowers/specs/2026-10-02-detection-and-automation-design.md`.
 
 ONVIF PTZ and events use handcrafted SOAP over `httpx` (`onvif/ptz.py`,
-`onvif/events.py`); `zeep` is a declared dependency but not on these paths. Event
+`onvif/events.py`); there is no `zeep` dependency. Event
 subscriptions are asyncio tasks on the uvicorn loop held in a module-level registry.
 They are not persisted and do not survive a restart.
 

@@ -50,7 +50,7 @@
           {% if camera.status == 'restarting' %}restarting in {{ camera.restart_in }}s{% else %}{{ camera.status }}{% endif %}
         </span>
       </td></tr>
-      {% if camera.last_error %}
+      {% if camera.last_error and camera.status != 'running' %}
       <tr><td>Last error</td><td><small class="camera-error">{{ camera.last_error }}</small></td></tr>
       {% endif %}
     </tbody>

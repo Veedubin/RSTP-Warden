@@ -60,7 +60,8 @@ def segment_dir(tmp_path: Path) -> Path:
     base_time = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
     for i in range(15):
         seg_time = base_time + timedelta(seconds=i * 4)
-        seg_name = seg_time.strftime("%Y%m%d_%H%M%S") + ".ts"
+        # Recorder names segments in local time (ffmpeg -strftime); mirror that here.
+        seg_name = seg_time.astimezone().strftime("%Y%m%d_%H%M%S") + ".ts"
         (cam_dir / seg_name).write_bytes(b"\x00" * 1000)  # fake segment data
 
     return cam_dir

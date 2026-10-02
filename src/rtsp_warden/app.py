@@ -40,6 +40,11 @@ class CameraRuntime:
     next_restart_at: float = 0.0
     last_error: str = ""
 
+    def mark_healthy(self) -> None:
+        """Clear restart state once every ingest process is running again."""
+        self.next_restart_at = 0.0
+        self.last_error = ""
+
 
 def _last_stderr_line(procs: list) -> str:
     """Return the last non-empty stderr line across ingest processes, or ''."""
@@ -206,7 +211,7 @@ class AppRuntime:
                     if all_running:
                         rt.rec_backoff.reset()
                         next_rec_restart[key] = 0.0
-                        rt.next_restart_at = 0.0
+                        rt.mark_healthy()
                     elif any_dead:
                         if sched <= 0.0:
                             delay = rt.rec_backoff.next_delay()

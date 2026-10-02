@@ -51,9 +51,11 @@ WARDEN_ADMIN_PASSWORD="changeme"
 WARDEN_AUTH_ENABLED="true"
 
 # ---- Web UI ----
-WARDEN_WEB_HOST="127.0.0.1"   # 0.0.0.0 to expose beyond localhost (Docker sets this)
+# Use 0.0.0.0 to expose beyond localhost (the Docker images set this)
+WARDEN_WEB_HOST="127.0.0.1"
 WARDEN_WEB_PORT="8080"
-WARDEN_HTTPS="false"          # true behind a TLS-terminating reverse proxy
+# true behind a TLS-terminating reverse proxy
+WARDEN_HTTPS="false"
 
 # ---- Camera credentials ----
 # Referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}

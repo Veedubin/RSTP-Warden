@@ -152,7 +152,8 @@ COPY --chown=nonroot:nonroot --from=builder /app/src /app/src
 ENV PATH="/app/.venv/bin:/usr/local/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    WARDEN_WEB_HOST=0.0.0.0
 
 # The nonroot user in distroless has uid 65532
 USER nonroot

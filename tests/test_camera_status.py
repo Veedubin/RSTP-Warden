@@ -50,3 +50,31 @@ def test_last_frame_age_from_hub():
     hub.update(b"\xff\xd8\xff\xd9")
     st = live_status(_rt([_Proc(True)], hub=hub))
     assert st["last_frame_age"] is not None and st["last_frame_age"] < 5
+
+
+def test_mark_healthy_clears_restart_state():
+    from rtsp_warden.app import CameraRuntime
+
+    rt = CameraRuntime.__new__(CameraRuntime)
+    rt.next_restart_at = 123.0
+    rt.last_error = "boom"
+    rt.mark_healthy()
+    assert rt.next_restart_at == 0.0
+    assert rt.last_error == ""
+
+
+def _event_rt(recording: bool, procs):
+    recorder = SimpleNamespace(
+        processes=lambda: [SimpleNamespace(proc=p) for p in procs],
+        camera=SimpleNamespace(record=SimpleNamespace(mode="event")),
+        _event_recording=recording,
+    )
+    return SimpleNamespace(recorder=recorder, next_restart_at=0.0, last_error="", hub=None)
+
+
+def test_event_mode_waiting_is_not_failed():
+    assert live_status(_event_rt(False, [None]), now=100.0)["status"] == "waiting"
+
+
+def test_event_mode_recording_is_running():
+    assert live_status(_event_rt(True, [_Proc(True)]), now=100.0)["status"] == "running"

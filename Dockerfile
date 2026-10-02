@@ -63,7 +63,8 @@ COPY --from=builder --chown=warden:warden /app/src /app/src
 # Make sure the venv is on PATH
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    WARDEN_WEB_HOST=0.0.0.0
 
 # Volume for recordings + config
 RUN mkdir -p /app/recordings /app/config /app/data && \
