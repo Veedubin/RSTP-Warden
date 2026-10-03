@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .config import CameraConfig, ProxyConfig, RuntimeConfig, StreamRecordConfig
+from .config import (
+    CameraConfig,
+    ProxyConfig,
+    RuntimeConfig,
+    StreamRecordConfig,
+    compute_tap_settings,
+)
 from .ffmpeg import ManagedProcess, build_ffmpeg_ingest_cmd
 from .frame_tap import FrameTapDispatcher
 
@@ -54,7 +60,7 @@ class StreamIngestor:
 
     # Frame tap (new) — dedicated low-res MJPEG stream for CV consumers
     frame_tap_enabled: bool = False
-    frame_tap_fps: int = 5
+    frame_tap_fps: float = 5.0
     frame_tap_scale_width: int = 320
     frame_tap_dispatcher: FrameTapDispatcher | None = None
 
@@ -337,6 +343,8 @@ class CameraRecorder:
     runtime: RuntimeConfig
     proxy_hub: FrameHub | None = None
     frame_tap_dispatcher: FrameTapDispatcher | None = None
+    # Frame tap (fps, width). None = compute_tap_settings(camera): detect_fps at 320 px.
+    tap_settings: tuple[float, int] | None = None
 
     main: StreamIngestor | None = None
     sub: StreamIngestor | None = None
@@ -392,6 +400,10 @@ class CameraRecorder:
         upstream = cam.main_url if stream_name == "main" else cam.sub_url
         assert upstream is not None
 
+        tap_fps, tap_width = (
+            self.tap_settings if self.tap_settings is not None else compute_tap_settings(cam)
+        )
+
         # Even if record is disabled, re-use rtsp_transport setting from record cfg defaults.
         # This avoids introducing a new config knob in the parallel phase.
         if record_cfg is None and cam.record is not None:
@@ -415,6 +427,8 @@ class CameraRecorder:
             mjpeg_hub=mjpeg_hub,
             rtsp_publish_url=publish_url,
             frame_tap_enabled=self.frame_tap_dispatcher is not None,
+            frame_tap_fps=tap_fps,
+            frame_tap_scale_width=tap_width,
             frame_tap_dispatcher=self.frame_tap_dispatcher,
             audio=cam.record.audio,
         )

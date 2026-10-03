@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import time
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from .deprecations import warn_once as _warn_once
 from .detectors.registry import DetectorSpec
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -278,6 +287,99 @@ class GridZoneConfig(BaseModel):
         return self
 
 
+# --- Detection and automation (RW-3) ---
+
+DETECT_FPS_MIN = 0.5
+DETECT_FPS_MAX = 30.0
+TAP_MIN_WIDTH = 320  # frame tap width for motion-only cameras (spec 5.3)
+
+_BETWEEN_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
+
+
+def parse_between(spec: str) -> tuple[time, time]:
+    """Parse a rule window "HH:MM-HH:MM" (local time) into (start, end).
+
+    The window may wrap midnight ("22:00-06:00"). Raises ValueError for a
+    malformed value, an hour above 23, a minute above 59, or start == end.
+    """
+    m = _BETWEEN_RE.match(spec)
+    if m is None:
+        raise ValueError(f"between must look like 'HH:MM-HH:MM', got {spec!r}")
+    h1, m1, h2, m2 = (int(g) for g in m.groups())
+    if h1 > 23 or h2 > 23 or m1 > 59 or m2 > 59:
+        raise ValueError(f"between needs hours 00-23 and minutes 00-59, got {spec!r}")
+    start, end = time(h1, m1), time(h2, m2)
+    if start == end:
+        raise ValueError(f"between start and end are the same time: {spec!r}")
+    return start, end
+
+
+class RuleConfig(BaseModel):
+    """A per-camera rule: which events fire which actions (spec 8.2).
+
+    An event matches when its label is in `labels` (empty = any), its zone is in
+    `zones` (empty = any), its confidence is >= `min_confidence`, and the local
+    time is inside `between` when set. `actions` names entries of the top-level
+    `actions` list. Unknown keys are an error so a typo such as `lables:` cannot
+    silently turn a rule into "match everything".
+    """
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    name: str
+    labels: list[str] = Field(default_factory=list)
+    zones: list[str] = Field(default_factory=list)
+    min_confidence: float = 0.0
+    between: str | None = None  # "HH:MM-HH:MM" local time, may wrap midnight
+    cooldown_seconds: float = 60.0
+    clip: bool = False
+    actions: list[str]
+
+    @field_validator("name")
+    @classmethod
+    def _name_valid(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("rule name must be non-empty")
+        if len(v2) > 64:
+            raise ValueError("rule name must be at most 64 characters")
+        return v2
+
+    @field_validator("labels", "zones", "actions")
+    @classmethod
+    def _names_nonempty(cls, v: list[str]) -> list[str]:
+        out = [item.strip() for item in v]
+        if any(not item for item in out):
+            raise ValueError("list entries must be non-empty names")
+        return out
+
+    @field_validator("min_confidence")
+    @classmethod
+    def _confidence_range(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("min_confidence must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("between", mode="before")
+    @classmethod
+    def _between_format(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("between must be a quoted string like '22:00-06:00'")
+        if not v.strip():
+            return None
+        start, end = parse_between(v)
+        return f"{start:%H:%M}-{end:%H:%M}"
+
+    @field_validator("cooldown_seconds")
+    @classmethod
+    def _cooldown_non_negative(cls, v: float) -> float:
+        if not v >= 0:
+            raise ValueError("cooldown_seconds must be >= 0")
+        return v
+
+
 class CameraConfig(BaseModel):
     name: str
     main_url: str
@@ -295,6 +397,12 @@ class CameraConfig(BaseModel):
     sensitivity: float = 50.0  # 0-100 scale, used for ALL detectors
     detect_classes: list[str] | None = None  # intersection with detector's allowed_classes
 
+    # Detection and automation (RW-3)
+    detect_fps: float = 5.0  # frame tap rate; a change restarts the camera's ingest
+    track_grace_seconds: float = 3.0  # an unmatched track closes after this long
+    min_track_frames: int = 2  # matched frames before a track becomes an event
+    rules: list[RuleConfig] = Field(default_factory=list)
+
     @field_validator("name")
     @classmethod
     def _name_nonempty(cls, v: str) -> str:
@@ -310,12 +418,123 @@ class CameraConfig(BaseModel):
             raise ValueError("sensitivity must be between 0.0 and 100.0")
         return v
 
+    @field_validator("detect_fps")
+    @classmethod
+    def _detect_fps_range(cls, v: float) -> float:
+        if not DETECT_FPS_MIN <= v <= DETECT_FPS_MAX:
+            raise ValueError(
+                f"detect_fps must be between {DETECT_FPS_MIN:g} and {DETECT_FPS_MAX:g}"
+            )
+        return v
+
+    @field_validator("track_grace_seconds")
+    @classmethod
+    def _grace_positive(cls, v: float) -> float:
+        if not v > 0:
+            raise ValueError("track_grace_seconds must be > 0")
+        return v
+
+    @field_validator("min_track_frames")
+    @classmethod
+    def _min_frames_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("min_track_frames must be >= 1")
+        return v
+
     @model_validator(mode="after")
     def _fallback_proxy_stream(self) -> CameraConfig:
         """Without a sub stream, the proxy (and frame tap) read the main stream."""
         if self.sub_url is None and self.proxy.stream == "sub":
             self.proxy.stream = "main"
         return self
+
+    @model_validator(mode="after")
+    def _detector_rates(self) -> CameraConfig:
+        """A detector cannot run faster than the tap: every spec fps <= detect_fps.
+
+        An fps that came from the deprecated interval_seconds is clamped with a
+        warning instead, so a config that loaded before keeps loading.
+        """
+        for i, spec in enumerate(self.detectors):
+            if spec.fps is None or spec.fps <= self.detect_fps:
+                continue
+            if spec._fps_from_interval:
+                _warn_once(
+                    f"interval-clamp:{self.name}:{i}",
+                    "camera %r detectors[%d] (%s): interval_seconds gives fps %g, above "
+                    "detect_fps %g; using fps %g",
+                    self.name,
+                    i,
+                    spec.type,
+                    spec.fps,
+                    self.detect_fps,
+                    self.detect_fps,
+                )
+                spec.fps = self.detect_fps
+                continue
+            raise ValueError(
+                f"detectors[{i}] ({spec.type}): fps {spec.fps:g} is above the camera's "
+                f"detect_fps {self.detect_fps:g}; lower fps or raise detect_fps"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _rules_valid(self) -> CameraConfig:
+        """Rule names are unique per camera; a clip rule needs recording on."""
+        seen: set[str] = set()
+        for rule in self.rules:
+            if rule.name in seen:
+                raise ValueError(f"duplicate rule name {rule.name!r}")
+            seen.add(rule.name)
+            if rule.clip and not self.record.enabled:
+                _warn_once(
+                    f"clip-without-recording:{self.name}:{rule.name}",
+                    "camera %r rule %r has clip: true but record.enabled is false; "
+                    "no clip will be made",
+                    self.name,
+                    rule.name,
+                )
+        return self
+
+    def effective_fps(self, spec: DetectorSpec) -> float:
+        """The rate a detector runs at: its own fps, else detect_fps, never above detect_fps."""
+        if spec.fps is None:
+            return float(self.detect_fps)
+        return float(min(spec.fps, self.detect_fps))
+
+    def motion_events_enabled(self, spec: DetectorSpec) -> bool:
+        """Whether a motion spec writes events rows (spec 7.4, 11).
+
+        An explicit `events` wins. Unset means yes, unless the camera has an
+        enabled `onnx` detector.
+        """
+        if spec.events is not None:
+            return spec.events
+        return not any(s.type == "onnx" and s.enabled for s in self.detectors)
+
+
+def _no_input_width(spec: DetectorSpec) -> int | None:
+    return None
+
+
+def compute_tap_settings(
+    cam: CameraConfig,
+    input_width_for: Callable[[DetectorSpec], int | None] = _no_input_width,
+) -> tuple[float, int]:
+    """Return the frame tap's (fps, scale width) for a camera (spec 5.3).
+
+    fps is the camera's detect_fps. The width is the largest model input width
+    among the camera's enabled detectors, as reported by `input_width_for`
+    (None for a detector without a model input), and never below TAP_MIN_WIDTH.
+    """
+    width = TAP_MIN_WIDTH
+    for spec in cam.detectors:
+        if not spec.enabled:
+            continue
+        w = input_width_for(spec)
+        if w is not None and w > width:
+            width = int(w)
+    return float(cam.detect_fps), width
 
 
 # --- Sprint 4: event recording + alerts + ONVIF config types ---

@@ -95,6 +95,23 @@ def test_frame_tap_validation_negative_fps() -> None:
         )
 
 
+@pytest.mark.parametrize(("fps", "expected"), [(0.5, "0.5"), (2.5, "2.5"), (5.0, "5"), (5, "5")])
+def test_frame_tap_fps_keeps_fractions(fps: float, expected: str) -> None:
+    """detect_fps may be fractional: the tap's -r must not truncate 0.5 to 0."""
+    cmd = build_ffmpeg_ingest_cmd(
+        ffmpeg_path="ffmpeg",
+        rtsp_url="rtsp://example.com/stream",
+        rtsp_transport_in="tcp",
+        record_enabled=False,
+        frame_tap_enabled=True,
+        frame_tap_fps=fps,
+        frame_tap_scale_width=320,
+        frame_tap_pipe="pipe:9",
+    )
+    i = cmd.index("pipe:9")
+    assert cmd[i - 6 : i] == ["-r", expected, "-c:v", "mjpeg", "-f", "mjpeg"]
+
+
 def test_managed_process_has_pass_fds() -> None:
     """ManagedProcess(pass_fds=(7,)) stores the tuple."""
     mp = ManagedProcess(name="test", args=["echo", "hi"], pass_fds=(7,))

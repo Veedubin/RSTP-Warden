@@ -397,7 +397,7 @@ def build_ffmpeg_ingest_cmd(
     rtsp_transport_out: str = "tcp",
     # Frame tap output (optional) — dedicated low-res MJPEG stream for CV consumers
     frame_tap_enabled: bool = False,
-    frame_tap_fps: int = 5,
+    frame_tap_fps: float = 5.0,
     frame_tap_scale_width: int = 320,
     frame_tap_pipe: str = "pipe:3",
     loglevel: str = "warning",
@@ -543,7 +543,7 @@ def build_ffmpeg_ingest_cmd(
             cmd += ["-vf", f"scale={int(frame_tap_scale_width)}:-1"]
         cmd += [
             "-r",
-            str(int(frame_tap_fps)),
+            f"{frame_tap_fps:g}",  # float: detect_fps may be 0.5 or 2.5
             "-c:v",
             "mjpeg",
             "-f",

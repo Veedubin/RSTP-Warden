@@ -7,8 +7,16 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
+from ..deprecations import warn_once
 from .base import Detector, NullDetector
 from .class_filter import effective_classes
 from .grid_mask import GridMask
@@ -21,7 +29,11 @@ from .sensitivity import (
 
 logger = logging.getLogger(__name__)
 
-DetectorType = Literal["motion", "person", "vehicle", "dnn", "custom"]
+DetectorType = Literal["motion", "person", "vehicle", "dnn", "custom", "onnx"]
+DetectorDevice = Literal["auto", "cuda", "cpu"]
+
+# Kept for one release; each logs a one-time deprecation warning naming `onnx`.
+LEGACY_DETECTOR_TYPES: frozenset[str] = frozenset({"person", "vehicle", "dnn"})
 
 
 class DetectorSpec(BaseModel):
@@ -35,7 +47,13 @@ class DetectorSpec(BaseModel):
 
     type: DetectorType
     enabled: bool = True
-    interval_seconds: float = 1.0
+    # Deprecated: `_convert_interval` turns it into `fps`, so after validation it
+    # is always None. Excluded from dumps so round trips never re-add it.
+    interval_seconds: float | None = Field(default=None, exclude=True)
+    fps: float | None = None  # None = the camera's detect_fps
+    model: str | None = None  # onnx: model registry name; None = "yolox-s"
+    device: DetectorDevice = "auto"  # onnx: execution provider choice
+    events: bool | None = None  # motion: write events; None = CameraConfig decides
     config: dict[str, Any] = Field(default_factory=dict)
     # Type-specific fields (optional, only used by some types)
     min_area: int | None = None
@@ -48,6 +66,74 @@ class DetectorSpec(BaseModel):
     # ROI and privacy masks (Batch 4)
     roi: list[tuple[int, int]] | None = None
     masks: list[list[tuple[int, int]]] | None = None
+
+    # True when `fps` was derived from a deprecated `interval_seconds`. Lets
+    # CameraConfig clamp such a value to detect_fps instead of rejecting it.
+    _fps_from_interval: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _convert_interval(
+        cls, data: Any, handler: ModelWrapValidatorHandler[DetectorSpec]
+    ) -> DetectorSpec:
+        """Accept the deprecated `interval_seconds` key and convert it to `fps`.
+
+        `fps = 1 / interval_seconds` when `fps` is not set; an explicit `fps`
+        wins. Either way the key is dropped and a one-time warning is logged.
+        """
+        converted = False
+        if isinstance(data, dict) and data.get("interval_seconds") is not None:
+            data = dict(data)
+            raw = data.pop("interval_seconds")
+            try:
+                interval = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError("interval_seconds must be a number") from None
+            if not interval > 0:
+                raise ValueError("interval_seconds must be > 0")
+            det_type = data.get("type")
+            key = f"interval_seconds:{det_type}:{interval:g}"
+            if data.get("fps") is None:
+                data["fps"] = 1.0 / interval
+                converted = True
+                warn_once(
+                    key,
+                    "detectors[].interval_seconds is deprecated and will be removed in the "
+                    "next release; use fps (type=%s: interval_seconds %g became fps %g)",
+                    det_type,
+                    interval,
+                    data["fps"],
+                )
+            else:
+                warn_once(
+                    key,
+                    "detectors[].interval_seconds is deprecated and is ignored because fps "
+                    "is also set (type=%s); remove interval_seconds",
+                    det_type,
+                )
+        spec = handler(data)
+        if converted:
+            spec._fps_from_interval = True
+        return spec
+
+    @field_validator("type")
+    @classmethod
+    def _warn_legacy(cls, v: str) -> str:
+        if v in LEGACY_DETECTOR_TYPES:
+            warn_once(
+                f"detector-type:{v}",
+                "detector type %r is deprecated and will be removed in the next release; "
+                "use type: onnx (model: yolox-s)",
+                v,
+            )
+        return v
+
+    @field_validator("fps")
+    @classmethod
+    def _fps_positive(cls, v: float | None) -> float | None:
+        if v is not None and not v > 0:
+            raise ValueError("fps must be > 0")
+        return v
 
 
 def build_detector(spec: DetectorSpec, camera_name: str) -> Detector:
