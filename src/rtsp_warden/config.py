@@ -500,6 +500,8 @@ class OnvifConfig(BaseModel):
 class RuntimeConfig(BaseModel):
     ffmpeg_path: str = "ffmpeg"
     mediamtx_path: str = "mediamtx"
+    # "Test connection" (rtsp_warden.probe). None or "": the ffprobe next to ffmpeg_path.
+    ffprobe_path: str | None = None
 
     ffmpeg_loglevel: str = "warning"
     workspace_dir: Path = Field(default_factory=lambda: Path("./workspace"))
