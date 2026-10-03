@@ -2,7 +2,38 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
-## 2026-10-02 (night) — START HERE: RW-2 and RW-3 built and merged; master is the integrated tree, not pushed
+## 2026-10-03 (morning) — START HERE: RW-2 + RW-3 built, merged, reviewed and fixed on local master; waiting for the owner's push decision
+
+**Where things are.** `master` in the single checkout `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`; code head
+`dcadb42` (review fixes in `fad1eb8`, integration in `57fb350`, merge in `80c2323`); 58 commits ahead of
+`origin/master` (`70fa60a`), nothing pushed. Gate at `dcadb42`: `uv run pytest -q` → 2156 passed, 1 skipped (the `gpu`
+marker); `uv run ruff check src/ tests/` → exactly 4 baseline E501 (`cli.py` x2, `proxy/mjpeg.py:143`, `recorder.py:401`);
+`uv run ruff format --check` clean. Python floor is `>=3.11`. Worktrees removed; branches `feat/ui-pass` and
+`feat/detection` are fully merged and can be deleted. The owner's real camera login is in the gitignored `.env` at the
+repo root (`CAM_USER` / `CAM_PASS`, mode 0600) and nowhere tracked; every committed example uses `admin` / `admin`.
+
+**What happened.** `/code-review high` over `e5623cb..master` (37 commits, ~14k lines): 8 findings, none Critical, all fixed
+test-first in `fad1eb8` (retention form answers 422 not 500 and patches only its camera; detection and retention saves answer
+409 when the camera left config.yaml; rule cooldowns survive a camera restart; one credential-redaction helper; model hash
+and descriptor reads cached; stale AlertManager comments). Then the owner, verbatim: "purge my password from ANYTHING that is
+going to be pushed to remote. put mine in a .env file ... Make it the default admin:admin for whatever you commit."
+Verified: no unpushed commit ADDS the password (RW-1's scrub commit `02f8a6c` only removes it); the two lines that hold it
+are already public in origin's pre-scrub `examples/configs/config-Foscam-C1-V3.yaml`. Placeholders switched to admin/admin
+in `dcadb42`.
+
+**Known open.**
+- origin's history still contains the old camera password. Only a history rewrite (`git filter-repo` + force push) removes
+  it, and it has been public, so the owner must rotate it on the camera either way. Both are the owner's decisions.
+- Manual Foscam tests (plan tasks RW-2/12, RW-3/19) and the `Dockerfile.cuda` build never ran (camera not released, no GPU host).
+- Pre-existing, out of scope: `record.mode: event` cameras cannot start recording from detection (the tap rides the same ffmpeg).
+- Rulings R1-R22 (`docs/superpowers/plans/2026-10-02-rw2-rw3-decisions.md`) were applied as written; the owner reviewed the
+  outcome, not each ruling.
+
+**Next, in order.** 1. Owner says "push" → `git push origin master` (explicit OK required; never force-push without it).
+2. Owner rotates the Foscam password and decides on the history rewrite. 3. Manual camera verification per the two plan tasks
+(camera at 192.168.1.72, main stream only; login in `.env`). 4. Build and test `Dockerfile.cuda` on a GPU host.
+
+## 2026-10-02 (night) — superseded by the block above: RW-2 and RW-3 built and merged; master is the integrated tree, not pushed
 
 **Where things are.** `master` = RW-1 + RW-0 + RW-2 (`feat/ui-pass`, 11 tasks) + RW-3 (`feat/detection`, 18 tasks) +
 the merge (`80c2323`) + the integration commit (`chore: integrate RW-2 and RW-3 after the merge`). Gate on master:
