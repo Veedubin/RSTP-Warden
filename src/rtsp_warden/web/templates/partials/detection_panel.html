@@ -32,7 +32,13 @@
         <input id="min-track-frames" name="min_track_frames" type="number" required step="1"
                min="1" value="{{ cam.min_track_frames }}">
       </label>
+      <label for="stationary-iou">
+        Stationary IoU
+        <input id="stationary-iou" name="stationary_iou" type="number" required step="any"
+               min="0" max="1" value="{{ '%g'|format(cam.stationary_iou) }}">
+      </label>
     </div>
+    <small class="detection-note">Stationary IoU: an object whose box still overlaps where it first appeared by at least this much has not moved and makes no event until it does (parked cars, furniture, shapes the model mistakes for objects). 0 turns the check off.</small>
     <button type="submit">Save detection settings</button>
     <small class="detection-note">Changing detect fps restarts this camera's ingest: recording pauses for a few seconds.</small>
   </form>
@@ -41,6 +47,7 @@
     Detect fps <strong>{{ '%g'|format(cam.detect_fps) }}</strong>
     &middot; track grace {{ '%g'|format(cam.track_grace_seconds) }} s
     &middot; min track frames {{ cam.min_track_frames }}
+    &middot; stationary IoU {{ '%g'|format(cam.stationary_iou) }}
   </p>
   {% endif %}
 
@@ -48,6 +55,10 @@
   <p class="detection-status"><small>
     {{ status.get('frames_processed', 0) }} frames analysed,
     {{ status.get('frames_dropped', 0) }} dropped because detection fell behind
+    {% if status.get('stationary_suppressed') or status.get('stationary_held') %}
+    &middot; {{ status.get('stationary_suppressed', 0) }} objects that never moved were held back
+    ({{ status.get('stationary_held', 0) }} held back right now)
+    {% endif %}
     {% if status.get('restart_pending') %}&middot; <mark>ingest restart pending</mark>{% endif %}
   </small></p>
   {% else %}

@@ -102,6 +102,8 @@ class DetectionStatus(TypedDict):
     errors: int
     warnings: list[str]  # "detector <index> (<type>): <text>" for every error and fallback
     detectors: list[DetectorStatus]
+    stationary_held: int  # tracks held back right now because they have not moved yet
+    stationary_suppressed: int  # tracks that ended without ever moving (no event made)
 
 
 class CameraStatus(TypedDict, total=False):
@@ -391,6 +393,8 @@ def summarize_detection(raw: Any) -> DetectionStatus | None:
         "processed": _as_int(raw.get("frames_processed")),
         "dropped": _as_int(raw.get("frames_dropped")),
         "errors": _as_int(raw.get("errors_total")),
+        "stationary_held": _as_int(raw.get("stationary_held")),
+        "stationary_suppressed": _as_int(raw.get("stationary_suppressed")),
         "warnings": warnings,
         "detectors": detectors,
     }

@@ -204,6 +204,9 @@ class DetectorRunner:
             "worker_count": len(self._workers),
             "detector_count": len(self.detectors),
             "detectors": [self._slot_status(i, slot) for i, slot in enumerate(self.slots)],
+            # Stationary suppression (RW-4): tracks held because they never moved.
+            "stationary_held": int(getattr(self.event_builder, "held_count", 0) or 0),
+            "stationary_suppressed": int(getattr(self.event_builder, "suppressed_total", 0) or 0),
         }
 
     def _slot_status(self, i: int, slot: DetectorSlot) -> dict[str, Any]:

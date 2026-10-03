@@ -233,6 +233,7 @@ cameras:
     detect_fps: 5                          # frames/s sent to the detectors, 0.5-30 (a change restarts ingest)
     track_grace_seconds: 3.0               # an object may vanish this long before its event ends
     min_track_frames: 2                    # matched frames in a row before an object becomes an event
+    stationary_iou: 0.6                    # an object that never moved makes no event (0 = off)
 
     detectors:                             # list; the web UI identifies a detector by its position
       - type: motion                       # MOG2 background subtraction
@@ -392,7 +393,7 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /cameras/{name}/detection` | user | Detection panel (htmx partial): `detect_fps`, tracking, detectors with their live provider, rules, "Fire test event" |
 | `POST /cameras/{name}/detectors/{index}/enabled` | admin | Toggle one detector (by its position in `detectors:`) on/off; writes back only that entry |
 | `POST /cameras/{name}/detectors/{index}/fps` | admin | Set one detector's own `fps` (at most the camera's `detect_fps`; empty = the camera's rate); a hot reload, no ingest restart |
-| `POST /cameras/{name}/detection` | admin | Save `detect_fps`, `track_grace_seconds` and `min_track_frames` (a new `detect_fps` restarts the camera's ingest) |
+| `POST /cameras/{name}/detection` | admin | Save `detect_fps`, `track_grace_seconds`, `min_track_frames` and `stationary_iou` (a new `detect_fps` restarts the camera's ingest) |
 | `POST /cameras/{name}/rules/test` | admin | "Fire test event": a synthetic `person` event through the camera's real rules and actions |
 | `GET /cameras/{name}/live-boxes.mjpeg` | user | Live MJPEG with the tracker's current boxes drawn (the "show boxes" switch) |
 | `POST /cameras/{name}/reload` | admin | Rebuild that camera's detectors from the in-memory config (no YAML re-read; restarts ingest only when the frame-tap settings change) |
@@ -482,6 +483,8 @@ onnx detector onnx (model yolox-s, device auto) provider: CUDAExecutionProvider
 ### Events
 
 Boxes from object detectors are matched across frames by a per-camera tracker (intersection over union, per label). A track that is matched on `min_track_frames` frames in a row (default 2) becomes one row in the `events` table: camera, label, best confidence, zone, and a JPEG thumbnail of the best frame with its box drawn (`<output_dir>/<camera>/thumbnails/<event_id>.jpg`). While the object stays in view, the row and thumbnail are updated when a better frame arrives (at most once per second). Once the tracker has not seen the object for `track_grace_seconds` (default 3), the event gets its end time. Two people walking past are two events; a person standing still for ten minutes is one.
+
+**Stationary objects.** A track whose box still overlaps the box it was first seen at by at least `stationary_iou` (default 0.6) has not moved, so it makes no event: a parked car, a chair, or a dark shape the model mistakes for a microwave every time the light changes. It is held instead, and opens as an event the moment its box drifts away from where it started (the event then starts at that frame). A camera restart or the lights coming on therefore no longer makes an event out of everything in view. `stationary_iou: 0` turns the check off. The Detection panel edits the value and shows how many objects were held back.
 
 Motion makes one event per burst (it opens after `min_track_frames` frames with motion and ends after `track_grace_seconds` without), with no thumbnail, and only when the camera has no enabled `onnx` detector or the motion detector sets `events: true`.
 

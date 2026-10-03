@@ -463,6 +463,10 @@ class CameraConfig(BaseModel):
     detect_fps: float = 5.0  # frame tap rate; a change restarts the camera's ingest
     track_grace_seconds: float = 3.0  # an unmatched track closes after this long
     min_track_frames: int = 2  # matched frames before a track becomes an event
+    # An object whose box still overlaps the box it was first seen at by at least this IoU has
+    # not moved: no event until it does (parked cars, furniture, shapes mistaken for objects).
+    # 0 turns the check off.
+    stationary_iou: float = 0.6
     rules: list[RuleConfig] = Field(default_factory=list)
 
     @field_validator("name")
@@ -508,6 +512,13 @@ class CameraConfig(BaseModel):
     def _min_frames_positive(cls, v: int) -> int:
         if v < 1:
             raise ValueError("min_track_frames must be >= 1")
+        return v
+
+    @field_validator("stationary_iou")
+    @classmethod
+    def _stationary_iou_range(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("stationary_iou must be between 0 and 1")
         return v
 
     @model_validator(mode="after")

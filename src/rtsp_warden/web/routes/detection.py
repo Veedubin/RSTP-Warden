@@ -223,7 +223,7 @@ async def save_detection_settings(
     name: str,
     user: CurrentUser = Depends(require_admin),
 ) -> Response:
-    """Save ``detect_fps``, ``track_grace_seconds`` and ``min_track_frames`` (admin-only).
+    """Save ``detect_fps``, ``track_grace_seconds``, ``min_track_frames`` and ``stationary_iou``.
 
     Only changed fields are written to config.yaml, then the camera's detectors are
     rebuilt once. A new ``detect_fps`` changes the tap rate, an ffmpeg argument, so the
@@ -236,6 +236,9 @@ async def save_detection_settings(
     detect_fps = _form_float(form, "detect_fps")
     grace = _form_float(form, "track_grace_seconds")
     min_frames = _form_int(form, "min_track_frames")
+    stationary = _form_float(form, "stationary_iou")
+    if not 0.0 <= stationary <= 1.0:
+        raise HTTPException(status_code=422, detail="stationary_iou must be between 0 and 1")
     if not DETECT_FPS_MIN <= detect_fps <= DETECT_FPS_MAX:
         raise HTTPException(
             status_code=422,
@@ -263,6 +266,8 @@ async def save_detection_settings(
         changes["track_grace_seconds"] = grace
     if min_frames != cam.min_track_frames:
         changes["min_track_frames"] = min_frames
+    if stationary != cam.stationary_iou:
+        changes["stationary_iou"] = stationary
 
     message: str | None = None
     error: str | None = None

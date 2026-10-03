@@ -635,3 +635,59 @@ def test_motion_events_flag_resolves_per_camera(tmp_path: Path) -> None:
     assert alone_slots[0].motion_events is True
     assert forced_slots[0].motion_events is True
     assert build_detectors_for_camera(alone, [], models_dir=tmp_path).slots == []
+
+
+# ---------------------------------------------------------------------------
+# Stationary suppression through the runner (RW-4)
+# ---------------------------------------------------------------------------
+
+
+def _walk_in_then_stand(ts: float) -> list[Detection]:
+    """A person walks in from the left for 2 s, then stands at PERSON_BOX."""
+    if ts < 2.0:
+        x = 20 + int(40 * ts)
+        return [Detection(kind="person", confidence=0.9, bbox=(x, 50, 40, 60))]
+    return [Detection(kind="person", confidence=0.9, bbox=PERSON_BOX)]
+
+
+def test_person_who_never_moves_makes_no_event_with_stationary_suppression(
+    tmp_path: Path,
+) -> None:
+    db = FakeDb()
+    runner = DetectorRunner(
+        slots=[_slot(ScriptedDetector(_person()), fps=1.0)],
+        tracker=Tracker(grace_seconds=3.0, min_frames=2),
+        event_builder=_builder(tmp_path, db, stationary_iou=0.6),
+        worker_count=0,
+        tap_fps=1.0,
+    )
+
+    _run(runner, _ticks(0.0, 60.0, 1.0))
+
+    assert db.of("insert") == []
+    assert runner.status()["stationary_held"] == 1
+    assert runner.status()["stationary_suppressed"] == 0
+    runner.teardown()
+    assert db.calls == []
+    assert runner.status()["stationary_held"] == 0
+    assert runner.status()["stationary_suppressed"] == 1
+
+
+def test_person_who_walks_in_and_then_stands_still_is_one_event(tmp_path: Path) -> None:
+    db = FakeDb()
+    runner = DetectorRunner(
+        slots=[_slot(ScriptedDetector(_walk_in_then_stand), fps=1.0)],
+        tracker=Tracker(grace_seconds=3.0, min_frames=2),
+        event_builder=_builder(tmp_path, db, stationary_iou=0.6),
+        worker_count=0,
+        tap_fps=1.0,
+    )
+
+    _run(runner, _ticks(0.0, 600.0, 1.0))
+
+    inserts = db.of("insert")
+    assert len(inserts) == 1
+    assert inserts[0][2]["created_at"] == _utc(1.0)  # the frame on which it had moved
+    assert runner.status()["stationary_held"] == 0
+    runner.teardown()
+    assert len(db.of("close")) == 1

@@ -507,3 +507,18 @@ def test_recorder_uses_explicit_tap_settings() -> None:
     assert recorder.main is not None
     assert recorder.main.frame_tap_fps == 0.5
     assert recorder.main.frame_tap_scale_width == 640
+
+
+# --- stationary_iou (RW-4) ----------------------------------------------------------------
+
+
+def test_stationary_iou_defaults_to_0_6_and_accepts_zero_and_one() -> None:
+    assert _cam().stationary_iou == 0.6
+    assert _cam(stationary_iou=0).stationary_iou == 0.0
+    assert _cam(stationary_iou=1).stationary_iou == 1.0
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_stationary_iou_outside_zero_to_one_is_rejected(bad: float) -> None:
+    with pytest.raises(ValidationError, match="stationary_iou must be between 0 and 1"):
+        _cam(stationary_iou=bad)

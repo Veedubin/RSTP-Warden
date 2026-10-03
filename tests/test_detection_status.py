@@ -114,6 +114,8 @@ def test_summarize_detection_drops_unknown_keys_and_non_finite_fps() -> None:
         "errors",
         "warnings",
         "detectors",
+        "stationary_held",
+        "stationary_suppressed",
     }
 
 
@@ -178,3 +180,20 @@ def test_camera_detection_summary_returns_the_summary() -> None:
     rt = SimpleNamespace(detection_status=lambda name: _raw(_motion_row(), dropped=4))
     out = camera_detection_summary(rt, "cam")
     assert out is not None and out["dropped"] == 4
+
+
+def test_summarize_detection_carries_the_stationary_counters() -> None:
+    raw = _raw(_onnx_row())
+    raw["stationary_held"] = 1
+    raw["stationary_suppressed"] = 5
+
+    out = summarize_detection(raw)
+
+    assert out is not None
+    assert (out["stationary_held"], out["stationary_suppressed"]) == (1, 5)
+
+
+def test_summarize_detection_defaults_the_stationary_counters_to_zero() -> None:
+    out = summarize_detection(_raw(_onnx_row()))
+    assert out is not None
+    assert (out["stationary_held"], out["stationary_suppressed"]) == (0, 0)

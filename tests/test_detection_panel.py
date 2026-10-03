@@ -79,6 +79,8 @@ def _live_status(name: str) -> dict[str, Any] | None:
     return {
         "frames_processed": 120,
         "frames_dropped": 7,
+        "stationary_held": 1,
+        "stationary_suppressed": 4,
         "restart_pending": False,
         "detectors": [
             {
@@ -346,8 +348,15 @@ def test_toggle_reports_a_config_write_failure(
 # --- detect_fps and tracking settings ----------------------------------------------------
 
 
-def _settings(detect_fps: str = "5", grace: str = "3", frames: str = "2") -> dict[str, str]:
-    return {"detect_fps": detect_fps, "track_grace_seconds": grace, "min_track_frames": frames}
+def _settings(
+    detect_fps: str = "5", grace: str = "3", frames: str = "2", stationary: str = "0.6"
+) -> dict[str, str]:
+    return {
+        "detect_fps": detect_fps,
+        "track_grace_seconds": grace,
+        "min_track_frames": frames,
+        "stationary_iou": stationary,
+    }
 
 
 def test_save_detect_fps_persists_and_rebuilds_once(env: SimpleNamespace) -> None:
@@ -398,6 +407,9 @@ def test_save_without_changes_writes_nothing(env: SimpleNamespace) -> None:
         _settings(grace="inf"),
         _settings(frames="0"),
         _settings(frames="2.5"),
+        _settings(stationary="1.5"),
+        _settings(stationary="-0.1"),
+        _settings(stationary="abc"),
         {"detect_fps": "5"},
     ],
 )
@@ -636,7 +648,12 @@ def test_detector_list_offers_an_fps_input_to_admins_only(
         ("/cameras/yard/detectors/1/fps", {"fps": "1"}),
         (
             "/cameras/yard/detection",
-            {"detect_fps": "4", "track_grace_seconds": "3", "min_track_frames": "2"},
+            {
+                "detect_fps": "4",
+                "track_grace_seconds": "3",
+                "min_track_frames": "2",
+                "stationary_iou": "0.6",
+            },
         ),
         ("/cameras/yard/sensitivity", {"sensitivity": "60", "action": "save_and_reload"}),
         ("/cameras/yard/detection-classes", {"classes_mode": "all", "action": "save_and_reload"}),
@@ -799,9 +816,38 @@ def test_detection_settings_refuse_when_camera_left_the_file(env: SimpleNamespac
     r = _post(
         env,
         "/cameras/yard/detection",
-        {"detect_fps": "4", "track_grace_seconds": "3", "min_track_frames": "2"},
+        {
+            "detect_fps": "4",
+            "track_grace_seconds": "3",
+            "min_track_frames": "2",
+            "stationary_iou": "0.6",
+        },
     )
     assert r.status_code == 409
     assert env.cfg.cameras[0].detect_fps == 5.0
     assert env.path.read_text(encoding="utf-8") == before
     env.runtime.rebuild_camera_detectors.assert_not_called()
+
+
+# --- stationary suppression in the panel (RW-4) ------------------------------------------
+
+
+def test_panel_shows_the_stationary_field_and_the_held_back_count(env: SimpleNamespace) -> None:
+    r = env.client.get("/cameras/yard/detection")
+    assert r.status_code == 200
+    assert 'name="stationary_iou"' in r.text
+    assert 'value="0.6"' in r.text
+    assert "4 objects that never moved were held back" in r.text
+    assert "1 held back right now" in r.text
+
+
+def test_save_stationary_iou_persists_and_reloads_detectors(env: SimpleNamespace) -> None:
+    r = _post(env, "/cameras/yard/detection", _settings(stationary="0"))
+    assert r.status_code == 200
+    assert "Detectors reloaded" in r.text
+    assert env.cfg.cameras[0].stationary_iou == 0.0
+    raw = _raw_camera(env.path)
+    assert raw["stationary_iou"] == 0
+    assert "detect_fps" not in raw
+    env.runtime.rebuild_camera_detectors.assert_called_once_with("yard")
+    env.runtime.request_restart_camera.assert_not_called()

@@ -15,6 +15,15 @@ Object events (``event_type="object"``), from ``TrackerUpdate``:
   when it closes, so the final best frame is never lost to the throttle.
 * ``closed``: set ``ended_at`` (= last seen), then call ``on_close``.
 
+Stationary suppression (RW-4, ``stationary_iou`` > 0): a track listed in ``opened`` whose
+current box still overlaps its ``first_bbox`` by at least ``stationary_iou`` has not moved
+since the tracker first saw it (a parked car, a chair, a shape the model mistakes for an
+object). It is held instead of opened: no row, no thumbnail, no callback. It opens on the
+first later update where its box has drifted below that IoU, with ``created_at`` = that
+frame's time, and a held track that closes first is dropped silently. ``held_count`` and
+``suppressed_total`` report both for the status surfaces. A track without ``first_bbox``
+(hand-built in tests) is never held.
+
 Motion events (``event_type="motion"``, ``label="motion"``): one row per burst (see
 ``MotionBurst``), confidence 1.0, empty zone, no thumbnail.
 
@@ -40,6 +49,7 @@ import numpy as np
 
 from ..db import schema as _schema
 from .grid_mask import GridMask, zone_for_point
+from .tracking import iou as _iou
 
 if TYPE_CHECKING:
     from .tracking import Track, TrackerUpdate
@@ -120,7 +130,10 @@ class EventBuilder:
         on_close: Callable[[EventInfo], None] | None = None,
         update_min_interval_s: float = 1.0,
         db: Any = _schema,
+        stationary_iou: float = 0.0,
     ) -> None:
+        if not 0.0 <= float(stationary_iou) <= 1.0:
+            raise ValueError(f"stationary_iou must be between 0 and 1, got {stationary_iou}")
         self.camera = camera
         self.output_dir = Path(output_dir)
         self.area_masks: list[tuple[str, GridMask]] = list(area_masks)
@@ -128,9 +141,12 @@ class EventBuilder:
         self.on_close = on_close
         self.update_min_interval_s = float(update_min_interval_s)
         self._db = db
+        self.stationary_iou = float(stationary_iou)
         self._lock = threading.Lock()
         self._closed = False
         self._open: dict[int, _OpenEvent] = {}
+        self._held: dict[int, Any] = {}  # tracking.Track by id: opened by the tracker, not moved
+        self._suppressed_total = 0
         self._motion: EventInfo | None = None
         self._frame_w = 0
         self._frame_h = 0
@@ -151,6 +167,24 @@ class EventBuilder:
                 ids.append(self._motion.id)
             return ids
 
+    @property
+    def held_count(self) -> int:
+        """Tracks the tracker opened that are held back because they have not moved yet."""
+        with self._lock:
+            return len(self._held)
+
+    @property
+    def suppressed_total(self) -> int:
+        """Held tracks that ended without ever moving (no event was made for them)."""
+        with self._lock:
+            return self._suppressed_total
+
+    def _is_stationary(self, track: Track) -> bool:
+        first = getattr(track, "first_bbox", None)
+        if self.stationary_iou <= 0.0 or first is None:
+            return False
+        return _iou(tuple(first), tuple(track.bbox)) >= self.stationary_iou
+
     def on_tracks(self, update: TrackerUpdate, frame_shape: tuple[int, int]) -> None:
         """Apply one tracker update. ``frame_shape`` is ``(height, width)`` of the tap frame."""
         frame_h, frame_w = int(frame_shape[0]), int(frame_shape[1])
@@ -159,9 +193,24 @@ class EventBuilder:
                 return
             self._frame_w, self._frame_h = frame_w, frame_h
             just_opened: set[int] = set()
+            closing_ids = {track.id for track in update.closed}
             for track in update.opened:
-                if track.id not in self._open and self._open_track(track):
+                if track.id in self._open or track.id in self._held:
+                    continue
+                if self._is_stationary(track):
+                    self._held[track.id] = track
+                elif self._open_track(track):
                     just_opened.add(track.id)
+            # Held tracks: open the ones that moved (the event starts when they moved), drop
+            # the ones that ended in place.
+            for track_id, track in list(self._held.items()):
+                if track_id in closing_ids:
+                    del self._held[track_id]
+                    self._suppressed_total += 1
+                elif not self._is_stationary(track):
+                    del self._held[track_id]
+                    if self._open_track(track, started_ts=float(track.last_seen)):
+                        just_opened.add(track.id)
             for track in update.improved:
                 state = self._open.get(track.id)
                 if state is not None and track.id not in just_opened:
@@ -201,6 +250,8 @@ class EventBuilder:
             for state in list(self._open.values()):
                 self._close_track(state)
             self._open.clear()
+            self._suppressed_total += len(self._held)
+            self._held.clear()
             if self._motion is not None:
                 self._close_motion(ts_unix)
 
@@ -238,9 +289,9 @@ class EventBuilder:
             self.area_masks, x + w / 2.0, y + h / 2.0, self._frame_w, self._frame_h
         )
 
-    def _open_track(self, track: Track) -> bool:
+    def _open_track(self, track: Track, *, started_ts: float | None = None) -> bool:
         zone = self._zone(track.best_bbox)
-        started = _utc(track.first_seen)
+        started = _utc(track.first_seen if started_ts is None else started_ts)
         confidence = float(track.best_confidence)
         try:
             event_id = int(

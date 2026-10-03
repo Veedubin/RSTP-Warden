@@ -763,3 +763,18 @@ def test_model_input_width_reads_each_descriptor_once(
     rt.rebuild_camera_detectors("front")  # a rebuild may follow a config change: forget
     assert rt._model_input_width(spec) == 640
     assert reads == ["yolox-s", "yolox-s"]
+
+
+def test_build_hands_the_camera_stationary_iou_to_its_event_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup: Callable[[AppRuntime], None]
+) -> None:
+    install_stub_onnx(monkeypatch)
+    cam = camera("front", tmp_path, detectors=[ONNX], stationary_iou=0.4)
+    rt = make_runtime(tmp_path, [cam], actions=())
+    cleanup(rt)
+
+    rt.build()
+
+    runner = rt.find_runner("front")
+    assert runner is not None and runner.event_builder is not None
+    assert runner.event_builder.stationary_iou == 0.4

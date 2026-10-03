@@ -376,6 +376,7 @@ New or changed keys (full example in 8.2):
 | `detectors[].events` | motion spec | false when an onnx detector is enabled | |
 | `track_grace_seconds` | camera | 3.0 | |
 | `min_track_frames` | camera | 2 | |
+| `stationary_iou` | camera | 0.6 | RW-4: a track whose box still overlaps its first box by this IoU opens no event until it moves; 0 = off |
 | `rules[]` | camera | `[]` | see 8.2 |
 | `actions[]` | top level | `[]` | replaces `alerts.notifiers` |
 | `runtime.models_dir` | top level | XDG cache | |

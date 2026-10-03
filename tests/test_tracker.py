@@ -471,3 +471,18 @@ def test_every_opened_track_is_closed_exactly_once() -> None:
     assert len(opened) == len(set(opened))
     assert len(opened) > 10
     assert sorted(closed) == sorted(opened)
+
+
+# ---------------------------------------------------------------------------
+# first_bbox (RW-4: stationary suppression needs where a track started)
+# ---------------------------------------------------------------------------
+
+
+def test_track_remembers_its_first_bbox_while_bbox_follows_the_object() -> None:
+    tracker = Tracker(min_frames=1, grace_seconds=1.0)
+    tracker.update([_det("person", (10, 10, 20, 40))], _frame(), 0.0)
+    update = tracker.update([_det("person", (14, 10, 20, 40))], _frame(), 0.5)
+
+    (track,) = update.active
+    assert track.first_bbox == (10, 10, 20, 40)
+    assert track.bbox == (14, 10, 20, 40)

@@ -722,6 +722,7 @@ class AppRuntime:
             area_masks=bundle.area_masks,
             on_open=self._on_event_open,
             on_close=self._on_event_close,
+            stationary_iou=cam.stationary_iou,
         )
         # One worker keeps each camera's frames in order (MOG2 and the tracker are stateful);
         # a short queue keeps drop-oldest meaning "freshest frame" when inference falls behind.

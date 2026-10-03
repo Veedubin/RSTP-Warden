@@ -475,3 +475,108 @@ def test_event_sink_real_database_row(clean_db: None) -> None:
     assert rows[0].event_type == "person"
     assert rows[0].severity == "warn"
     assert schema.as_utc(rows[0].created_at) == _utc(1_700_000_000.0)
+
+
+# ---------------------------------------------------------------------------
+# Stationary suppression (RW-4): a track that never moved opens no event
+# ---------------------------------------------------------------------------
+
+
+def _still(track_id: int = 1, *, bbox=(100, 50, 40, 60), **kwargs: Any) -> Track:
+    """A track whose current box is exactly where it started."""
+    track = _track(track_id, bbox=bbox, **kwargs)
+    track.first_bbox = bbox
+    return track
+
+
+def test_stationary_track_is_held_back_and_opens_no_event(tmp_path: Path) -> None:
+    db = FakeDb()
+    opened: list[EventInfo] = []
+    builder = _builder(tmp_path, db, on_open=opened.append, stationary_iou=0.6)
+
+    builder.on_tracks(_update(opened=(_still(),)), SHAPE)
+
+    assert db.calls == []
+    assert opened == []
+    assert builder.open_event_ids == []
+    assert builder.held_count == 1
+
+
+def test_held_track_opens_once_it_moves_with_the_move_time_as_start(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db, stationary_iou=0.6)
+    track = _still()
+    builder.on_tracks(_update(opened=(track,)), SHAPE)
+
+    track.bbox = (102, 51, 40, 60)  # jitter: IoU with the first box stays above 0.6
+    track.last_seen = 11.0
+    builder.on_tracks(_update(), SHAPE)
+    assert db.of("insert") == []
+
+    track.bbox = (160, 50, 40, 60)  # a real move: no overlap with the first box
+    track.last_seen = 12.0
+    builder.on_tracks(_update(), SHAPE)
+
+    inserts = db.of("insert")
+    assert len(inserts) == 1
+    assert inserts[0][2]["created_at"] == _utc(12.0)
+    assert inserts[0][2]["track_id"] == 1
+    assert builder.held_count == 0
+    assert builder.open_event_ids == [inserts[0][1]]
+
+
+def test_held_track_that_closes_leaves_no_trace_but_is_counted(tmp_path: Path) -> None:
+    db = FakeDb()
+    closed: list[EventInfo] = []
+    builder = _builder(tmp_path, db, on_close=closed.append, stationary_iou=0.6)
+    track = _still()
+    builder.on_tracks(_update(opened=(track,)), SHAPE)
+
+    builder.on_tracks(_update(closed=(track,)), SHAPE)
+
+    assert db.calls == []
+    assert closed == []
+    assert builder.held_count == 0
+    assert builder.suppressed_total == 1
+
+
+def test_close_all_drops_held_tracks(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db, stationary_iou=0.6)
+    builder.on_tracks(_update(opened=(_still(), _still(2))), SHAPE)
+
+    builder.close_all(20.0)
+
+    assert db.calls == []
+    assert builder.held_count == 0
+    assert builder.suppressed_total == 2
+
+
+def test_moving_track_opens_at_once(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db, stationary_iou=0.6)
+    track = _track(bbox=(160, 50, 40, 60))
+    track.first_bbox = (100, 50, 40, 60)
+
+    builder.on_tracks(_update(opened=(track,)), SHAPE)
+
+    assert len(db.of("insert")) == 1
+    assert db.of("insert")[0][2]["created_at"] == _utc(10.0)
+
+
+def test_stationary_check_is_off_by_default_and_without_a_first_bbox(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db)
+    builder.on_tracks(_update(opened=(_still(),)), SHAPE)
+    assert len(db.of("insert")) == 1
+
+    db2 = FakeDb()
+    builder2 = _builder(tmp_path, db2, stationary_iou=0.6)
+    builder2.on_tracks(_update(opened=(_track(),)), SHAPE)  # first_bbox unknown: not stationary
+    assert len(db2.of("insert")) == 1
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.5])
+def test_stationary_iou_outside_zero_to_one_is_rejected(tmp_path: Path, value: float) -> None:
+    with pytest.raises(ValueError):
+        _builder(tmp_path, FakeDb(), stationary_iou=value)

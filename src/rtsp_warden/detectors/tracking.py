@@ -27,6 +27,8 @@ Contract (the runner, EventBuilder and live preview rely on every line):
 - ``ts_unix`` lower than the previous update's is clamped to it (wall clock stepped back), so
   ``first_seen <= last_seen`` always holds.
 - Bboxes are xywh ints in pixels of the frame given to ``update``; confidences are plain floats.
+- ``first_bbox`` is the box the track was created with and never changes; ``bbox`` follows the
+  object.
 """
 
 from __future__ import annotations
@@ -62,6 +64,9 @@ class Track:
     open: bool = True
     event_id: int | None = None
     zone: str = ""
+    # Where the track started; never updated. The EventBuilder compares ``bbox`` against it to
+    # tell an object that moved from one that only flickers in place (stationary suppression).
+    first_bbox: Box | None = None
 
 
 @dataclass
@@ -200,6 +205,7 @@ class Tracker:
                     best_bbox=box,
                     best_frame=_copy_frame(frame_bgr),
                     best_ts=ts,
+                    first_bbox=box,
                 )
                 self._next_id += 1
                 created.append((track, conf))
