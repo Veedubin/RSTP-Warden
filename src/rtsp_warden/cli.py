@@ -152,6 +152,51 @@ def _require_binaries(cfg: AppConfig) -> None:
         which_or_raise(cfg.runtime.mediamtx_path)
 
 
+def _public_url(cfg: AppConfig, settings: WebSettings) -> str:
+    """Base of the links in action payloads (R19): runtime.public_url, else the bind address.
+
+    A wildcard bind host (0.0.0.0, ::) is not an address a browser can open, so it becomes
+    localhost; set runtime.public_url when notifications are opened on another machine.
+    """
+    if cfg.runtime.public_url:
+        return cfg.runtime.public_url.rstrip("/")
+    host = settings.host.strip()
+    if host in ("", "0.0.0.0", "::"):
+        host = "localhost"
+    elif ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{int(settings.port)}"
+
+
+def _onnx_providers() -> list[str]:
+    """Execution providers this onnxruntime build offers; [] when onnxruntime is missing."""
+    try:
+        import onnxruntime
+    except Exception:
+        return []
+    try:
+        return [str(p) for p in onnxruntime.get_available_providers()]
+    except Exception:
+        return []
+
+
+def _onnx_device_check(device: str, providers: list[str]) -> str:
+    """doctor's verdict on one onnx detector's device for this onnxruntime build (spec 10)."""
+    if not providers:
+        return "FAIL (onnxruntime is not installed)"
+    has_cuda = "CUDAExecutionProvider" in providers
+    if device == "cuda":
+        if has_cuda:
+            return "OK (cuda)"
+        return (
+            "WARN (cuda requested, but this onnxruntime has no CUDA provider: "
+            "runs on CPU; install the gpu extra)"
+        )
+    if device == "auto":
+        return "OK (auto: cuda)" if has_cuda else "OK (auto: cpu)"
+    return "OK (cpu)"
+
+
 def _import_consumer(spec: str) -> Any:
     """Load a FrameConsumer instance from a spec.
 
@@ -471,6 +516,16 @@ def doctor(
         free = _port_is_free(host, port)
         table.add_row(f"port {cam.name}:{port}", "OK" if free else "IN USE")
 
+    # detection: can this onnxruntime build run each onnx detector where it asks? (spec 10)
+    providers: list[str] | None = None
+    for cam in cfg.cameras:
+        for index, spec in enumerate(cam.detectors):
+            if spec.type != "onnx" or not spec.enabled:
+                continue
+            if providers is None:
+                providers = _onnx_providers()
+            table.add_row(f"onnx {cam.name}[{index}]", _onnx_device_check(spec.device, providers))
+
     console.print(table)
 
 
@@ -518,11 +573,16 @@ def serve(
     # Only after the config is known good; an admin user is only useful with the web UI.
     bootstrap_database(create_admin=web)
 
+    # Links in notifications (event, thumbnail and clip URLs) start with this base (R19).
+    public_url = _public_url(cfg, _resolve_web_settings(web_host, web_port))
+    console.print(f"Links in notifications: {public_url}")
+
     # Each camera gets its own frame tap dispatcher; --frame-consumer consumers join every one.
     rt = AppRuntime(
         cfg=cfg,
         frame_consumers=_build_frame_consumers(frame_consumer),
         detectors_enabled=detectors,
+        public_url=public_url,
     )
     rt.build()
 

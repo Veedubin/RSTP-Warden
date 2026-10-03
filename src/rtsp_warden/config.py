@@ -939,10 +939,26 @@ class RuntimeConfig(BaseModel):
     # ONNX model files and user model directories (<models_dir>/<name>/model.yaml).
     models_dir: Path = Field(default_factory=default_models_dir)
 
+    # Base of the links in action payloads (event, thumbnail, clip). None = the web UI's bind
+    # address, with 0.0.0.0 / :: shown as localhost; set it for Docker or a reverse proxy.
+    public_url: str | None = None
+
     @field_validator("models_dir")
     @classmethod
     def _expand_models_dir(cls, v: Path) -> Path:
         return v.expanduser()
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().rstrip("/")
+        if not v:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("public_url must start with http:// or https://")
+        return v
 
     @field_validator(
         "restart_backoff_min_s",

@@ -598,7 +598,7 @@ def test_a_request_queued_during_a_drain_waits_for_the_next_tick(
     runtime.build()
     follow_ups: list[Future[None]] = []
 
-    def rebuild_and_ask_again(name: str) -> None:
+    def rebuild_and_ask_again(name: str, **_kw: object) -> None:
         # RW-3's rebuild may ask for a restart when the tap settings change (R18).
         if not follow_ups:
             follow_ups.append(runtime.request_restart_camera(name))
@@ -791,7 +791,7 @@ def test_a_detector_failure_does_not_stop_a_hot_add(
     runtime = _runtime([])
     runtime.build()
 
-    def broken_rebuild(name: str) -> None:
+    def broken_rebuild(name: str, **_kw: object) -> None:
         raise RuntimeError("model file missing")
 
     monkeypatch.setattr(runtime, "rebuild_camera_detectors", broken_rebuild)
@@ -812,7 +812,7 @@ def test_a_detector_failure_does_not_stop_a_restart(
     _start(runtime, monkeypatch)
     calls.clear()
 
-    def broken_rebuild(name: str) -> None:
+    def broken_rebuild(name: str, **_kw: object) -> None:
         raise RuntimeError("model file missing")
 
     monkeypatch.setattr(runtime, "rebuild_camera_detectors", broken_rebuild)

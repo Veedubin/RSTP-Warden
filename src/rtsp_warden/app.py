@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import re
@@ -8,20 +9,31 @@ import threading
 import time
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Literal
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal
 
 from rich.console import Console
 from rich.table import Table
 
-from .config import AppConfig, CameraConfig
-from .detectors.registry import build_detectors_for_camera
+from .actions.base import Action, ActionPayload
+from .actions.factory import build_actions
+from .actions.queue import ActionJob, ActionQueue, ClipJob, ClipScheduler
+from .actions.rules import RuleDecision, RuleEngine
+from .clips import build_event_clip, clip_stream_and_chunk
+from .config import AppConfig, CameraConfig, DetectorSpec, compute_tap_settings
+from .db import schema as db_schema
+from .detectors.event_builder import EventBuilder, EventInfo, MotionBurst
+from .detectors.model_registry import load_descriptor
+from .detectors.registry import DEFAULT_ONNX_MODEL, build_detectors_for_camera
 from .detectors.runner import DetectorRunner
 from .detectors.sinks import EventSink
+from .detectors.tracking import Tracker
 from .ffmpeg import ExponentialBackoff
 from .frame_tap import FrameConsumer, FrameTapDispatcher
 from .proxy.mjpeg import FrameHub, MjpegProxyServer
 from .proxy.rtsp_mediamtx import MediaMTXProxyServer
-from .recorder import CameraRecorder
+from .recorder import CameraRecorder, StreamIngestor
 from .retention import RetentionManager
 from .retention_resolver import resolve_retention
 
@@ -51,6 +63,9 @@ class CameraRuntime:
     # This camera's own frame tap fan-out: its detector runner, then any --frame-consumer
     # consumers. It is created before the recorder, whose proxy-stream ingestor feeds it.
     dispatcher: FrameTapDispatcher = field(default_factory=FrameTapDispatcher)
+    # This camera's rules. Built with the runtime and kept across detector rebuilds, so a hot
+    # reload does not reset rule cooldowns; None only in hand-built test runtimes.
+    rule_engine: RuleEngine | None = None
 
     def mark_healthy(self) -> None:
         """Clear restart state once every ingest process is running again."""
@@ -110,6 +125,21 @@ class _RuntimeRequest:
     future: Future[None]
 
 
+# A clip job waits this long after ended_at + clips.post_seconds, so ffmpeg has closed the
+# segment that holds the end of the clip window before it is cut (R8).
+CLIP_SETTLE_SECONDS = 2.0
+
+
+def _utc(dt: datetime) -> datetime:
+    """*dt* as an aware UTC datetime; naive values are UTC (how the database stores them)."""
+    return db_schema.as_utc(dt) or dt
+
+
+def _iso_utc(dt: datetime) -> str:
+    """ISO 8601 with an explicit +00:00 offset, as action payloads carry it."""
+    return _utc(dt).isoformat()
+
+
 @dataclass
 class AppRuntime:
     cfg: AppConfig
@@ -120,6 +150,18 @@ class AppRuntime:
     frame_consumers: tuple[FrameConsumer, ...] = ()
     detectors_enabled: bool = True
     detector_runners: list[DetectorRunner] = field(default_factory=list)
+    # Base of the absolute links in action payloads; cli.serve sets it (R19).
+    public_url: str = "http://localhost:8080"
+    # Configured actions by name, the queue that runs them and the delayed clip jobs: build()
+    # creates them, start() starts their worker threads, stop_all() stops them.
+    actions: dict[str, Action] = field(default_factory=dict)
+    action_queue: ActionQueue | None = None
+    clip_scheduler: ClipScheduler | None = None
+    # Events that a rule with clip: true matched, waiting for their close (under _clip_lock).
+    _clip_events: set[int] = field(default_factory=set, init=False, repr=False)
+    _clip_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    # The ingest restart each camera last requested because its frame tap had to change.
+    _tap_restarts: dict[str, Future[None]] = field(default_factory=dict, init=False, repr=False)
     _event_sink: EventSink | None = field(default=None, init=False, repr=False)
     _detector_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     # Lifecycle requests posted from any thread and applied by run_forever on the main thread.
@@ -130,6 +172,10 @@ class AppRuntime:
     )
 
     def build(self) -> None:
+        # Process-wide action plumbing; nothing starts until start().
+        self.actions = build_actions(self.cfg)
+        self.action_queue = ActionQueue(self.actions)
+        self.clip_scheduler = ClipScheduler(builder=self._build_clip)
         self.cameras = [self._build_camera_runtime(cam) for cam in self.cfg.cameras]
 
         # Wire detector framework
@@ -161,6 +207,9 @@ class AppRuntime:
             proxy_hub=hub,
             frame_tap_dispatcher=dispatcher,
             frame_tap_required=self._wants_frames(cam),
+            # detect_fps and the widest model input: the value rebuild_camera_detectors compares
+            # the running ingest against, so a restart can never loop (R18).
+            tap_settings=self.tap_settings_for(cam),
         )
 
         if cam.proxy.enabled:
@@ -202,6 +251,7 @@ class AppRuntime:
             rec_backoff=rec_backoff,
             proxy_backoff=proxy_backoff,
             dispatcher=dispatcher,
+            rule_engine=RuleEngine(cam.name, cam.rules),
         )
 
     def _wants_frames(self, cam: CameraConfig) -> bool:
@@ -220,6 +270,12 @@ class AppRuntime:
 
     def start(self) -> None:
         self._install_signals()
+
+        # Action and clip workers first, so the first event already has somewhere to go.
+        if self.action_queue is not None:
+            self.action_queue.start()
+        if self.clip_scheduler is not None:
+            self.clip_scheduler.start()
 
         # Start detector runners
         for runner in self.detector_runners:
@@ -400,7 +456,7 @@ class AppRuntime:
         self.cameras = [*self.cameras, rt]
         if self.detectors_enabled:
             try:
-                self.rebuild_camera_detectors(cam.name)
+                self.rebuild_camera_detectors(cam.name, from_lifecycle=True)
             except Exception:
                 # As in start(): a detector problem never keeps the camera from recording.
                 log.warning(
@@ -441,7 +497,7 @@ class AppRuntime:
         self.cameras = [new if r is old else r for r in self.cameras]
         if self.detectors_enabled:
             try:
-                self.rebuild_camera_detectors(name)
+                self.rebuild_camera_detectors(name, from_lifecycle=True)
             except Exception:
                 # As in start(): a detector problem never keeps the camera from recording.
                 log.warning("[supervisor] detectors for %s failed to build", name, exc_info=True)
@@ -583,6 +639,16 @@ class AppRuntime:
         for rt in self.cameras:
             self._stop_camera(rt)
 
+        # The runners are down, so nothing enqueues any more. Queued action jobs get the
+        # queue's own stop timeout; clip jobs not yet due are dropped (segments stay on disk).
+        for worker in (self.action_queue, self.clip_scheduler):
+            if worker is None:
+                continue
+            try:
+                worker.stop()
+            except Exception:
+                log.warning("[supervisor] stopping %s failed", type(worker).__name__, exc_info=True)
+
     def _install_signals(self) -> None:
         def _handle(_signum, _frame) -> None:
             log.info("Stopping (SIGINT/SIGTERM)...")
@@ -610,16 +676,34 @@ class AppRuntime:
             self._set_consumers(cam_rt, runner)
 
     def _make_runner(self, cam: CameraConfig) -> DetectorRunner | None:
-        """Build (not set up) the camera's DetectorRunner; None when it has no detectors."""
+        """Build (not set up) the camera's DetectorRunner; None when it has no detectors.
+
+        Every runner gets fresh tracking state (Tracker, EventBuilder, MotionBurst), so a
+        rebuild resets it (spec 7.1). The EventBuilder hands opened events to the camera's
+        rules and closed ones to the clip scheduler. A detector that cannot be built (an
+        unknown model, say) only costs that camera its detection, never its recording.
+        """
         if not self.detectors_enabled or not any(s.enabled for s in cam.detectors):
             return None
-        bundle = build_detectors_for_camera(
-            cam, cam.detectors, models_dir=self.cfg.runtime.models_dir
-        )
+        try:
+            bundle = build_detectors_for_camera(
+                cam, cam.detectors, models_dir=self.cfg.runtime.models_dir
+            )
+        except Exception:
+            log.warning("[detect] building the detectors of %s failed", cam.name, exc_info=True)
+            return None
         if not bundle.detectors:
             return None
         if self._event_sink is None:
             self._event_sink = EventSink()
+        tap_fps, _tap_width = self.tap_settings_for(cam)
+        event_builder = EventBuilder(
+            camera=cam.name,
+            output_dir=Path(cam.record.output_dir),
+            area_masks=bundle.area_masks,
+            on_open=self._on_event_open,
+            on_close=self._on_event_close,
+        )
         # One worker keeps each camera's frames in order (MOG2 and the tracker are stateful);
         # a short queue keeps drop-oldest meaning "freshest frame" when inference falls behind.
         return DetectorRunner(
@@ -632,6 +716,13 @@ class AppRuntime:
             roi=bundle.roi,
             grid_masks=bundle.grid_masks,
             camera=cam.name,
+            slots=tuple(bundle.slots),
+            tracker=Tracker(grace_seconds=cam.track_grace_seconds, min_frames=cam.min_track_frames),
+            event_builder=event_builder,
+            motion_burst=MotionBurst(
+                min_frames=cam.min_track_frames, grace_seconds=cam.track_grace_seconds
+            ),
+            tap_fps=tap_fps,
         )
 
     def _set_consumers(self, cam_rt: CameraRuntime, runner: DetectorRunner | None) -> None:
@@ -642,16 +733,22 @@ class AppRuntime:
         head: tuple[FrameConsumer, ...] = (runner,) if runner is not None else ()
         cam_rt.dispatcher.consumers = (*head, *self.frame_consumers)
 
-    def rebuild_camera_detectors(self, camera_name: str) -> None:
+    def rebuild_camera_detectors(self, camera_name: str, *, from_lifecycle: bool = False) -> None:
         """Rebuild one camera's detectors from its in-memory CameraConfig and swap the runner.
 
         The new runner is set up first, then swapped into ``detector_runners`` and onto the
         camera's own dispatcher under ``_detector_lock``, so the tap never feeds a stopped
         runner; the old runner is torn down afterwards. Without enabled detectors the
-        dispatcher keeps only the --frame-consumer consumers. Nothing is restarted.
+        dispatcher keeps only the --frame-consumer consumers. When the frame tap the camera
+        needs changed (detect_fps, a wider model input, a first detector on a camera without
+        an ingest), one ingest restart is requested; run_forever applies it (R18).
 
         Args:
             camera_name: Name of the camera whose detectors to rebuild.
+            from_lifecycle: True when _apply_add / _apply_restart call it on the main thread
+                inside a drain, right after building the camera from its current config. The
+                fresh recorder already carries tap_settings_for(cam), and a drain must never
+                enqueue a lifecycle request, so no restart is considered then.
 
         Raises:
             ValueError: If the camera name is not found.
@@ -677,6 +774,257 @@ class AppRuntime:
                 r.teardown()
             except Exception:
                 log.warning("detector runner teardown failed for %s", camera_name, exc_info=True)
+
+        if not from_lifecycle:
+            self._request_restart_if_tap_changed(cam_rt)
+
+    # ------------------------------------------------------------------
+    # Detection wiring: frame tap, events -> rules -> actions and clips
+    # ------------------------------------------------------------------
+
+    def payload_for(self, event: EventInfo) -> ActionPayload:
+        """The payload every action gets for *event*, with absolute links from public_url."""
+        event_url = f"{self.public_url.rstrip('/')}/events/{event.id}"
+        return ActionPayload(
+            camera=event.camera,
+            label=event.label,
+            confidence=float(event.confidence),
+            zone=event.zone,
+            started_at=_iso_utc(event.started_at),
+            ended_at=_iso_utc(event.ended_at) if event.ended_at is not None else None,
+            thumbnail_url=f"{event_url}/thumbnail.jpg" if event.thumbnail_path else None,
+            clip_url=f"{event_url}/clip" if event.clip_path else None,
+            event_url=event_url,
+            test=event.event_type == "test",
+        )
+
+    def dispatch_event(
+        self, event: EventInfo, *, bypass_cooldown: bool = False, allow_clip: bool = True
+    ) -> RuleDecision | None:
+        """Run the camera's rules on an opened event and queue the matched actions (spec 8.3).
+
+        The EventBuilder calls this (through _on_event_open) when an event opens, on the
+        runner's worker thread. The "Fire test event" route calls it with
+        ``bypass_cooldown=True, allow_clip=False`` (R13). Each matched action is queued once
+        per event, with the thumbnail file attached when it exists. Rules held back by their
+        cooldown are noted on the event as ``suppressed_by`` (spec 8.2). When a matched rule
+        has ``clip: true`` and ``allow_clip`` is set, the clip is queued when the event
+        closes. Returns None when the camera is unknown or has no rule engine.
+        """
+        rt = self.find_camera(event.camera)
+        if rt is None or rt.rule_engine is None:
+            return None
+        decision = rt.rule_engine.evaluate(event, bypass_cooldown=bypass_cooldown)
+        if decision.suppressed:
+            self._note_suppressed(event.id, list(decision.suppressed))
+        if decision.matched and self.action_queue is not None:
+            payload = self.payload_for(event)
+            attachment = self._thumbnail_file(event)
+            queued: set[str] = set()
+            for match in decision.matched:
+                for action_name in match.actions:
+                    if action_name in queued:
+                        continue  # two rules naming one action send it once
+                    queued.add(action_name)
+                    if action_name not in self.actions:
+                        log.warning("[actions] %s: no action named %r", event.camera, action_name)
+                        continue
+                    self.action_queue.enqueue(
+                        ActionJob(
+                            event_id=event.id,
+                            action_name=action_name,
+                            payload=payload,
+                            attachment=attachment,
+                        )
+                    )
+        if allow_clip and any(match.clip for match in decision.matched):
+            with self._clip_lock:
+                self._clip_events.add(event.id)
+        return decision
+
+    def _on_event_open(self, event: EventInfo) -> None:
+        """EventBuilder hook: rules fire on open. Never raises into the runner's worker."""
+        try:
+            self.dispatch_event(event)
+        except Exception:
+            log.warning("[actions] rules for event %s failed", event.id, exc_info=True)
+
+    def _on_event_close(self, event: EventInfo) -> None:
+        """EventBuilder hook: queue the clip of a closed event that a clip rule matched (R8).
+
+        The job may run at ended_at + clips.post_seconds + CLIP_SETTLE_SECONDS. Cameras that
+        do not record (R20) and a disabled ``clips`` section get no clip.
+        """
+        with self._clip_lock:
+            wanted = event.id in self._clip_events
+            self._clip_events.discard(event.id)
+        if not wanted or self.clip_scheduler is None or event.ended_at is None:
+            return
+        cam = self._camera_config(event.camera)
+        if cam is None or not cam.record.enabled or not self.cfg.clips.enabled:
+            return
+        ended = _utc(event.ended_at)
+        not_before = ended.timestamp() + float(self.cfg.clips.post_seconds) + CLIP_SETTLE_SECONDS
+        try:
+            self.clip_scheduler.schedule(
+                ClipJob(
+                    event_id=event.id,
+                    camera=event.camera,
+                    started_at=_utc(event.started_at),
+                    ended_at=ended,
+                    not_before=not_before,
+                )
+            )
+        except Exception:
+            log.warning("[clips] could not queue the clip of event %s", event.id, exc_info=True)
+
+    def _build_clip(self, job: ClipJob) -> Path | None:
+        """ClipScheduler builder: cut the event's clip from the camera's recorded segments.
+
+        Returns the clip's path relative to record.output_dir (what events.clip_path stores,
+        R20), or None when the camera is gone, records nothing, or ffmpeg produced nothing.
+        """
+        cam = self._camera_config(job.camera)
+        if cam is None or not cam.record.enabled:
+            return None
+        stream, chunk_seconds = clip_stream_and_chunk(cam)
+        path = build_event_clip(
+            camera_root=Path(cam.record.output_dir) / cam.name,
+            stream=stream,
+            chunk_seconds=chunk_seconds,
+            started_at=job.started_at,
+            ended_at=job.ended_at,
+            pre_seconds=float(self.cfg.clips.pre_seconds),
+            post_seconds=float(self.cfg.clips.post_seconds),
+            max_duration=float(self.cfg.clips.max_duration),
+            event_id=job.event_id,
+            ffmpeg_path=self.cfg.runtime.ffmpeg_path,
+        )
+        if path is None:
+            return None
+        try:
+            return Path(path).relative_to(cam.record.output_dir)
+        except ValueError:
+            return Path(path)
+
+    def _note_suppressed(self, event_id: int, rule_names: list[str]) -> None:
+        """Record on the event which rules' cooldown held it back (metadata suppressed_by)."""
+        try:
+            row = db_schema.get_event(event_id)
+            meta = json.loads(row.metadata_json or "{}") if row is not None else {}
+            meta["suppressed_by"] = rule_names
+            db_schema.update_event(event_id, metadata=meta)
+        except Exception:
+            log.warning(
+                "[actions] could not note suppressed_by on event %s", event_id, exc_info=True
+            )
+
+    def _camera_config(self, name: str) -> CameraConfig | None:
+        """The running camera's config, else the configured one, else None."""
+        rt = self.find_camera(name)
+        if rt is not None:
+            return rt.camera
+        return next((c for c in self.cfg.cameras if c.name == name), None)
+
+    def _thumbnail_file(self, event: EventInfo) -> Path | None:
+        """Absolute path of the event's thumbnail when the file exists (ntfy/Apprise attach it)."""
+        cam = self._camera_config(event.camera)
+        if cam is None or not event.thumbnail_path:
+            return None
+        path = Path(cam.record.output_dir) / event.thumbnail_path
+        return path if path.is_file() else None
+
+    def tap_settings_for(self, cam: CameraConfig) -> tuple[float, int]:
+        """The frame tap this camera needs: (detect_fps, widest enabled model input, >= 320).
+
+        The recorder is built with it and rebuild_camera_detectors compares the running
+        ingest against it, so the two never disagree and a restart cannot loop (R18).
+        """
+        return compute_tap_settings(cam, self._model_input_width)
+
+    def _model_input_width(self, spec: DetectorSpec) -> int | None:
+        """input_size[0] of an onnx spec's model; None for other types and unknown models."""
+        if spec.type != "onnx":
+            return None
+        try:
+            desc = load_descriptor(spec.model or DEFAULT_ONNX_MODEL, self.cfg.runtime.models_dir)
+        except Exception:
+            return None  # the registry skips a detector whose model it cannot resolve, too
+        return int(desc.input_size[0])
+
+    @staticmethod
+    def _tap_ingestor(rt: CameraRuntime) -> StreamIngestor | None:
+        """The ingestor of the camera's proxy stream: the one that carries its frame tap."""
+        return rt.recorder.main if rt.camera.proxy.stream == "main" else rt.recorder.sub
+
+    def _tap_restart_needed(self, rt: CameraRuntime) -> bool:
+        """True when the ingest must restart to give the camera's frame consumers their tap.
+
+        That is when something consumes frames and either no ingestor carries a tap (the
+        first detector on a camera that records and proxies nothing) or the running tap's
+        (fps, width) differ from tap_settings_for() (detect_fps edited, a wider model).
+        """
+        if not self._wants_frames(rt.camera):
+            return False
+        ing = self._tap_ingestor(rt)
+        if ing is None or not ing.frame_tap_enabled:
+            return True
+        running = (float(ing.frame_tap_fps), int(ing.frame_tap_scale_width))
+        return running != self.tap_settings_for(rt.camera)
+
+    def _request_restart_if_tap_changed(self, rt: CameraRuntime) -> None:
+        """Queue one ingest restart when the tap must change; run_forever applies it."""
+        if not self._tap_restart_needed(rt):
+            return
+        name = rt.camera.name
+        pending = self._tap_restarts.get(name)
+        if pending is not None and not pending.done():
+            return  # the queued restart rebuilds from the newest config anyway
+        fps, width = self.tap_settings_for(rt.camera)
+        log.info(
+            "[detect] %s: frame tap now %g fps at %d px; restarting its ingest", name, fps, width
+        )
+        self._tap_restarts[name] = self.request_restart_camera(name)
+
+    def find_runner(self, name: str) -> DetectorRunner | None:
+        """The current DetectorRunner of camera *name*, or None. Safe from any thread."""
+        runner_name = f"detector_{name}"
+        for runner in list(self.detector_runners):
+            if runner.name == runner_name:
+                return runner
+        return None
+
+    def detection_status(self, name: str) -> dict[str, Any] | None:
+        """JSON-safe detection status of camera *name*, or None when there is no such camera.
+
+        runner.status() (counters and per-detector rows), plus ``camera``, ``enabled`` (a
+        runner exists), the tap the camera needs (``tap_fps``, ``tap_width``) and
+        ``restart_pending`` (its running ingest does not provide that tap yet). Each
+        per-detector row carries ``error``: why that detector's model is not loaded, or None.
+        """
+        rt = self.find_camera(name)
+        if rt is None:
+            return None
+        runner = self.find_runner(name)
+        status: dict[str, Any] = dict(runner.status()) if runner is not None else {}
+        if runner is not None:
+            rows = status.get("detectors")
+            if not isinstance(rows, list):
+                rows = [{} for _ in runner.detectors]
+                status["detectors"] = rows
+            for row, det in zip(rows, runner.detectors, strict=False):
+                if isinstance(row, dict):
+                    error = getattr(det, "error", None)
+                    row.setdefault("error", str(error) if error else None)
+        tap_fps, tap_width = self.tap_settings_for(rt.camera)
+        status.update(
+            camera=name,
+            enabled=runner is not None,
+            tap_fps=float(tap_fps),
+            tap_width=int(tap_width),
+            restart_pending=bool(self._tap_restart_needed(rt)),
+        )
+        return status
 
     def _status_table(self) -> None:
         table = Table(title="rtsp-warden status", show_lines=False)
