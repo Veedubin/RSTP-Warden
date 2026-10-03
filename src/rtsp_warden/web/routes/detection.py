@@ -22,7 +22,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.concurrency import run_in_threadpool
 
 from ...config import DETECT_FPS_MAX, DETECT_FPS_MIN, AppConfig, CameraConfig, RetentionConfig
@@ -42,6 +48,14 @@ from ..services.detection import (
     label_choices,
     runtime_detection_status,
     write_failed_message,
+)
+from ..services.preview import (
+    MJPEG_CONTENT_TYPE,
+    box_annotator,
+    boxes_max_age,
+    find_hub,
+    live_boxes_for,
+    mjpeg_frames,
 )
 from ._common import find_camera, get_cfg, get_config_path, templates
 
@@ -746,3 +760,28 @@ async def save_camera_detection_classes(
     if error is not None:
         return _classes_page(request, cfg, cam_config, error=error)
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)
+
+
+@router.get("/{name}/live-boxes.mjpeg")
+async def camera_live_boxes(
+    request: Request, name: str, user=Depends(require_user)
+) -> StreamingResponse:
+    """Same-origin MJPEG stream with the tracker's current boxes drawn on each frame.
+
+    The plain stream stays at /cameras/{name}/live.mjpeg (web/routes/cameras.py). The runner
+    is looked up again for every frame because detector rebuilds replace it; frames pass
+    through unannotated while nothing fresh is tracked. Works without a loaded config, like
+    live.mjpeg; then the stale limit is the default.
+    """
+    provider = request.app.state.runtime_provider
+    hub = find_hub(provider(), name)
+    if hub is None:
+        raise HTTPException(status_code=503, detail="No live preview for this camera")
+    cfg = getattr(request.app.state, "cfg", None)
+    cam = find_camera(cfg, name) if cfg is not None else None
+    annotate = box_annotator(lambda: live_boxes_for(provider(), name), max_age_s=boxes_max_age(cam))
+    return StreamingResponse(
+        mjpeg_frames(hub, annotate=annotate),
+        media_type=MJPEG_CONTENT_TYPE,
+        headers={"Cache-Control": "no-store"},
+    )

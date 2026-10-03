@@ -9,10 +9,23 @@
 
 {# Live MJPEG embed #}
 {% if mjpeg_url %}
-<article>
-  <header>Live preview</header>
+<article x-data="{
+           boxes: false,
+           init() { try { this.boxes = localStorage.getItem('warden.preview.boxes') === '1' } catch (e) {} },
+           save() { try { localStorage.setItem('warden.preview.boxes', this.boxes ? '1' : '0') } catch (e) {} }
+         }">
+  <header class="preview-header">
+    <span>Live preview</span>
+    <label class="preview-boxes-toggle">
+      <input type="checkbox" role="switch" x-model="boxes" @change="save()">
+      Show boxes
+    </label>
+  </header>
   <div class="mjpeg-container">
     <img src="{{ mjpeg_url }}" alt="Live MJPEG stream for {{ camera.name }}"
+         data-plain-src="{{ mjpeg_url }}"
+         data-boxes-src="/cameras/{{ camera.name }}/live-boxes.mjpeg"
+         :src="boxes ? $el.dataset.boxesSrc : $el.dataset.plainSrc"
          onerror="this.alt='Stream unavailable'; this.style.background='#f0f0f0';">
   </div>
   <footer>
