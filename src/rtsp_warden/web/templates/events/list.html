@@ -2,10 +2,9 @@
 {% block title %}Events{% endblock %}
 
 {% block content %}
-<hgroup>
-  <h1>Events</h1>
-  <p>{{ total }} event{{ '' if total == 1 else 's' }}{% if filtered %} matching the filters{% endif %}</p>
-</hgroup>
+{% set title = "Events" %}
+{% set subtitle %}{{ total }} event{{ '' if total == 1 else 's' }}{% if filtered %} matching the filters{% endif %}{% endset %}
+{% include "partials/page_header.html" %}
 
 <article>
   <form method="get" action="/events" class="filter-form">

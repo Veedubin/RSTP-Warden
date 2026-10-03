@@ -14,7 +14,6 @@ from fastapi.responses import HTMLResponse
 from ..auth_depends import require_user
 from ..services.cameras import list_cameras
 from ..services.events import count_events_by_type, list_events
-from ..services.recordings import list_recordings
 from ..services.runtime import get_runtime_status
 from ._common import templates
 
@@ -38,15 +37,9 @@ async def dashboard(request: Request, user=Depends(require_user)) -> HTMLRespons
         else {"ok": True, "cameras": [], "errors": [], "version": "unknown"}
     )
 
-    # Recent recordings (last 5)
-    try:
-        recent_recordings, _ = list_recordings(limit=5)
-    except Exception:
-        recent_recordings = []
-
     # Recent events (last 10)
     try:
-        recent_events, _ = list_events(limit=10)
+        recent_events, _ = list_events(limit=10, cfg=cfg)
     except Exception:
         recent_events = []
 
@@ -66,7 +59,6 @@ async def dashboard(request: Request, user=Depends(require_user)) -> HTMLRespons
             "request": request,
             "cameras": cameras,
             "status": status,
-            "recent_recordings": recent_recordings,
             "recent_events": recent_events,
             "detections_today": detections_today,
             "detections_by_type": detections_by_type,

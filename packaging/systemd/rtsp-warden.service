@@ -35,6 +35,7 @@ ReadWritePaths=/var/lib/rtsp-warden /var/log/rtsp-warden /etc/rtsp-warden
 # Environment
 EnvironmentFile=-/etc/rtsp-warden/warden.env
 Environment=PYTHONUNBUFFERED=1
+Environment=WARDEN_MODELS_DIR=/var/lib/rtsp-warden/models
 
 [Install]
 WantedBy=multi-user.target

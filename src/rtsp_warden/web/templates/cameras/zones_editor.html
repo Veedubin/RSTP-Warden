@@ -99,6 +99,7 @@
         <input type="hidden" name="blocked_cell" :value="cell.col + ',' + cell.row">
       </template>
       <div class="grid">
+        {% include "partials/zone_kind.html" %}
         <button type="submit" class="primary">Save zone</button>
         <a href="/cameras/{{ camera_name }}/zones" role="button" class="secondary">Cancel</a>
       </div>

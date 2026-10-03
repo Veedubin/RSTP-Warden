@@ -8,6 +8,7 @@
   <header>
     <a href="/cameras/{{ camera.name }}">{{ camera.name }}</a>
     <span class="status-badge status-{{ camera.status }}">{{ camera.status_label }}</span>
+    {% include "partials/_detection_badge.html" %}
   </header>
   <div class="camera-card-body">
     <small>

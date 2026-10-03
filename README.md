@@ -304,7 +304,7 @@ onvif:                              # discovery, PTZ and events are all OFF by d
   ptz_enabled: false
   events_enabled: false
   username: admin                   # used for every camera; ONVIF is reached on the camera's
-  password: ${ONVIF_PASS}           # RTSP host, port 80, /onvif/device_service
+  password: ${ONVIF_PASS}           # RTSP host, cameras[].onvif_port (default 80), /onvif/device_service
 actions:                            # see Rules and actions below
   - name: phone
     type: ntfy

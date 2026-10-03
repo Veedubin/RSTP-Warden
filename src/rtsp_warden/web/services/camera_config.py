@@ -10,7 +10,6 @@ config.yaml (see ``web/env_file.py``).
 from __future__ import annotations
 
 import re
-import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +21,7 @@ from pydantic import ValidationError
 
 from ... import ports
 from ...config import _ENV_REF, AppConfig, CameraConfig, expand_env
-from ..config_lock import _locked_write_yaml
+from ..config_lock import CONFIG_RMW_LOCK, _locked_write_yaml
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 _RESERVED_NAMES = frozenset({"new"})
@@ -230,7 +229,7 @@ def raw_camera_entry(inp: NewCameraInput, proxy_port: int) -> tuple[dict[str, An
 # in this process goes through update_raw_config, which holds this lock from the read to
 # the write, so two writers (add camera, zone save, preset save) cannot lose each other's
 # change. Writers outside this module (zones, retention, detectors) must use it too.
-_RMW_LOCK = threading.Lock()
+_RMW_LOCK = CONFIG_RMW_LOCK
 _NESTED_KEYS = frozenset({"record", "proxy"})
 
 

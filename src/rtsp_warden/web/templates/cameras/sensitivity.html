@@ -2,10 +2,9 @@
 {% block title %}Sensitivity: {{ camera_name }}{% endblock %}
 
 {% block content %}
-<hgroup>
-  <h1>Sensitivity for {{ camera_name }}</h1>
-  <p>Adjust how aggressively detections are triggered</p>
-</hgroup>
+{% set title = "Sensitivity for " ~ camera_name %}
+{% set subtitle = "Adjust how aggressively detections are triggered" %}
+{% include "partials/page_header.html" %}
 
 {% if error %}<p class="detection-error" role="alert">{{ error }}</p>{% endif %}
 

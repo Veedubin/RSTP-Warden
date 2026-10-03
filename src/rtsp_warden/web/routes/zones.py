@@ -113,6 +113,7 @@ async def zones_editor(
             "frame_width": frame_width,
             "frame_height": frame_height,
             "blocked_cells_json": blocked_cells_json,
+            "zone_kind": existing_zone.kind if existing_zone else "ignore",
             "snapshot_url": snapshot_url,
         },
     )

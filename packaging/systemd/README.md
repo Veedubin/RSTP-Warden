@@ -48,5 +48,8 @@ sudo packaging/systemd/uninstall.sh --purge-data # remove recordings
 | `/etc/rtsp-warden/warden.env` | Environment overrides |
 | `/var/lib/rtsp-warden/recordings` | Video segments |
 | `/var/lib/rtsp-warden/data` | SQLite DB (`WARDEN_DB_URL` in `warden.env` points here) |
+| `/var/lib/rtsp-warden/models` | Detection models (`WARDEN_MODELS_DIR`, set in the unit) |
+
+`/etc/rtsp-warden` is in the unit's `ReadWritePaths` because the web UI writes `config.yaml` and `.env` there (adding cameras, detector toggles, zones). Run `install.sh` again on an older install so the directory is `0770 root:rtsp-warden`.
 | `/var/log/rtsp-warden` | Logs (also in journal) |
 | `/etc/systemd/system/rtsp-warden.service` | Service unit |

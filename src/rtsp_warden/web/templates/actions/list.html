@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Actions{% endblock %}
 {% block content %}
-<hgroup>
-  <h1>Actions</h1>
-  <p>Where notifications go when a camera rule matches an event.</p>
-</hgroup>
+{% set title = "Actions" %}
+{% set subtitle = "Where notifications go when a camera rule matches an event." %}
+{% include "partials/page_header.html" %}
 
 {% if stats_error %}
 <p role="alert"><mark>Run history is unavailable right now (the database could not be read). The actions below come from config.yaml.</mark></p>

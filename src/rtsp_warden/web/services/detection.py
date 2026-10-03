@@ -13,7 +13,6 @@ in-process lock (``update_config_yaml``), so two saves never drop each other's c
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,7 +37,7 @@ from ...detectors.model_registry import (
 )
 from ...detectors.registry import LEGACY_DETECTOR_TYPES
 from ...status_model import camera_detection_summary
-from ..config_lock import _locked_write_yaml
+from ..config_lock import CONFIG_RMW_LOCK, _locked_write_yaml
 
 if TYPE_CHECKING:
     from ...config import AppConfig, CameraConfig, DetectorSpec
@@ -224,7 +223,7 @@ def write_failed_message(config_path: Path, exc: OSError) -> str:
 # locks only the write, so two saves that each read the file first (a detector toggle
 # and a detection-settings save, say) would both write their own stale copy and lose
 # the other's change. RW-2's write-backs can share this helper after the merge.
-_CONFIG_RMW_LOCK = threading.Lock()
+_CONFIG_RMW_LOCK = CONFIG_RMW_LOCK
 
 
 def update_config_yaml(config_path: Path, mutate: Callable[[dict[str, Any]], bool]) -> bool:

@@ -58,7 +58,7 @@ from ..services.preview import (
     live_boxes_for,
     mjpeg_frames,
 )
-from ._common import find_camera, get_cfg, get_config_path, templates
+from ._common import find_camera, get_cfg, get_config_path, is_htmx, templates
 
 log = logging.getLogger(__name__)
 
@@ -66,11 +66,6 @@ router = APIRouter(prefix="/cameras")
 
 
 # --- helpers -----------------------------------------------------------------------------
-
-
-def _is_htmx(request: Request) -> bool:
-    """True for requests sent by htmx (they carry ``HX-Request: true``)."""
-    return request.headers.get("HX-Request") == "true"
 
 
 def _camera_or_404(cfg: AppConfig, name: str) -> CameraConfig:
@@ -289,7 +284,7 @@ async def save_detection_settings(
         else:
             message = "Saved. Detectors reloaded."
 
-    if _is_htmx(request):
+    if is_htmx(request):
         return _panel_response(request, cfg, cam, user, message=message, error=error)
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)
 
@@ -359,7 +354,7 @@ async def toggle_detector_enabled(
     spec.enabled = enabled
     await run_in_threadpool(_try_rebuild_detectors, request, name)
 
-    if _is_htmx(request):
+    if is_htmx(request):
         return _detector_list_response(request, cfg, cam, user, message)
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)
 
@@ -429,7 +424,7 @@ async def set_detector_fps(
     spec._fps_from_interval = False  # an explicit value now, never clamped as converted
     await run_in_threadpool(_try_rebuild_detectors, request, name)
 
-    if _is_htmx(request):
+    if is_htmx(request):
         return _detector_list_response(request, cfg, cam, user, message)
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)
 

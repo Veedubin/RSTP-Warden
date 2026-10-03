@@ -52,6 +52,10 @@ ADMIN_PAGES = (
     "/users/1/reset-password",
     "/api-tokens",
     "/onvif",
+    "/events",
+    "/actions",
+    f"/cameras/{CAMERA}/sensitivity",
+    f"/cameras/{CAMERA}/detection-classes",
 )
 
 # Pages whose fixture data renders at least one table, so the wrap check bites.

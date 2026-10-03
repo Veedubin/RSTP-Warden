@@ -2,13 +2,9 @@
 {% block title %}Detection classes: {{ camera_name }}{% endblock %}
 
 {% block content %}
-<hgroup>
-  <h1>Detection classes for {{ camera_name }}</h1>
-  <p>
-    {% if classes_mode == 'all' %}All {{ all_classes|length }} classes active
-    {% else %}{{ active_classes|length }} of {{ all_classes|length }} classes active{% endif %}
-  </p>
-</hgroup>
+{% set title = "Detection classes for " ~ camera_name %}
+{% set subtitle %}{% if classes_mode == 'all' %}All {{ all_classes|length }} classes active{% else %}{{ active_classes|length }} of {{ all_classes|length }} classes active{% endif %}{% endset %}
+{% include "partials/page_header.html" %}
 
 {% if error %}<p class="detection-error" role="alert">{{ error }}</p>{% endif %}
 

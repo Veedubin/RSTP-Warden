@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import threading
 from pathlib import Path
 
 import yaml
@@ -33,3 +34,8 @@ def _locked_write_yaml(path: Path, data: dict) -> None:
             os.replace(tmp, path)
         finally:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
+
+# In-process lock for every read-modify-write of config.yaml (camera saves, detector
+# toggles, zone saves). _locked_write_yaml only serialises the write itself.
+CONFIG_RMW_LOCK = threading.Lock()
