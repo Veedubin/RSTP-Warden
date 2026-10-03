@@ -352,3 +352,37 @@ a.button.outline.secondary {
   margin: 0;
   padding: 0.25rem 0.75rem;
 }
+
+/* --- Mobile width (RW-2 Task 11): no sideways page scroll on a 375 px phone --- */
+main h1,
+.camera-card header a,
+main code,
+.camera-card-body small {
+  overflow-wrap: anywhere;
+}
+.zone-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 800px;
+  max-width: 100%;
+  background: #222;
+  color: #999;
+}
+@media (max-width: 600px) {
+  .camera-card header {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+}
+/* .camera-card has no padding, so Pico's negative article > header margins would push
+   the card header 1rem past the card's top and sides (found in the 375 px pass). */
+.camera-card > header {
+  margin-top: 0;
+  margin-right: 0;
+  margin-left: 0;
+}
+/* The detail page's Edit / Delete row sits between the page header and the content. */
+#camera-actions {
+  margin-bottom: var(--pico-spacing);
+}

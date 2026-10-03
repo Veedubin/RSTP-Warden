@@ -3,10 +3,12 @@
 {% block title %}System Settings{% endblock %}
 
 {% block content %}
-<article>
-  <h1>System Settings</h1>
+{% set title = "System Settings" %}
+{% include "partials/page_header.html" %}
 
+<article>
   <h2>System Information</h2>
+  <div class="table-wrap">
   <table>
     <tbody>
       <tr><td><strong>Version</strong></td><td>{{ version }}</td></tr>
@@ -21,8 +23,10 @@
       {% endif %}
     </tbody>
   </table>
+  </div>
 
   <h2>Environment Variables</h2>
+  <div class="table-wrap">
   <table>
     <thead>
       <tr><th>Variable</th><th>Value</th></tr>
@@ -33,6 +37,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <mark>
     System settings are read-only from the web UI. To change configuration,

@@ -2,14 +2,14 @@
 {% block title %}Detection zones: {{ camera_name }}{% endblock %}
 
 {% block content %}
-<hgroup>
-  <h1>Detection zones for {{ camera_name }}</h1>
-  <p>{{ zones|length }} zone(s) configured</p>
-</hgroup>
+{% set title = "Detection zones for " ~ camera_name %}
+{% set subtitle = (zones | length) ~ " zone(s) configured" %}
+{% include "partials/page_header.html" %}
 
 <article>
   <header>Zone list</header>
   {% if zones %}
+  <div class="table-wrap">
   <table>
     <thead>
       <tr><th>Name</th><th>Grid</th><th>Blocked cells</th><th>Frame</th><th>Actions</th></tr>
@@ -36,6 +36,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p>No detection zones configured. Zones let you block parts of the frame to ignore detections in those areas.</p>
   {% endif %}

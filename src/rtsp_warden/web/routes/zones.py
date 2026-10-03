@@ -12,12 +12,12 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ...config import AppConfig, GridZoneConfig
 from ..auth_depends import CurrentUser, require_admin
 from ..config_lock import _locked_write_yaml
-from ._common import find_camera, get_cfg, get_config_path, templates
+from ._common import find_camera, get_cfg, get_config_path, is_htmx, set_flash, templates
 
 log = logging.getLogger(__name__)
 
@@ -57,14 +57,15 @@ async def zones_editor(
     zone_name: str = "",
     user: CurrentUser = Depends(require_admin),
 ) -> HTMLResponse:
-    """Render the grid zone editor as an htmx partial (admin-only).
+    """Render the grid zone editor (admin-only).
 
     Query params:
         zone_name: If editing an existing zone, pass its name.
                    If empty, the editor creates a new zone.
 
     Returns:
-        HTML partial with SVG grid overlay and snapshot image.
+        The editor inside the base layout when a link opens it, or the bare
+        partial (SVG grid overlay and snapshot image) for an htmx request.
     """
     cfg = get_cfg(request)
     cam = find_camera(cfg, name)
@@ -93,9 +94,14 @@ async def zones_editor(
     # Serialize blocked cells as list of "col,row" strings for Alpine.js
     blocked_cells_json = [{"col": c, "row": r} for c, r in sorted(blocked_cells)]
 
+    # The zones page opens the editor with a plain link, so a normal request gets the
+    # full page (layout, CSS, Alpine, viewport meta tag); an htmx request gets the partial.
+    template_name = (
+        "cameras/zones_editor.html" if is_htmx(request) else "cameras/zones_editor_page.html"
+    )
     return templates.TemplateResponse(
         request,
-        "cameras/zones_editor.html",
+        template_name,
         {
             "request": request,
             "camera_name": name,
@@ -115,7 +121,7 @@ async def save_zone(
     request: Request,
     name: str,
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Save a zone configuration (admin-only).
 
     Form fields:
@@ -205,12 +211,17 @@ async def save_zone(
     if not replaced:
         updated_zones.append(new_zone)
 
+    previous_zones = cam.zones
     cam.zones = updated_zones
 
     # Persist to config.yaml
     config_path = get_config_path(request)
     if config_path is not None:
-        _persist_zones(config_path, cfg)
+        try:
+            _persist_zones(config_path, cfg)
+        except OSError as exc:
+            cam.zones = previous_zones
+            return _write_failed(request, name, config_path, exc)
 
     return RedirectResponse(url=f"/cameras/{name}/zones", status_code=303)
 
@@ -221,7 +232,7 @@ async def delete_zone(
     name: str,
     zone_name: str,
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Delete a zone from a camera (admin-only).
 
     On success, redirects to /cameras/{name}/zones.
@@ -231,12 +242,17 @@ async def delete_zone(
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
+    previous_zones = cam.zones
     cam.zones = [z for z in cam.zones if z.name != zone_name]
 
     # Persist to config.yaml
     config_path = get_config_path(request)
     if config_path is not None:
-        _persist_zones(config_path, cfg)
+        try:
+            _persist_zones(config_path, cfg)
+        except OSError as exc:
+            cam.zones = previous_zones
+            return _write_failed(request, name, config_path, exc)
 
     return RedirectResponse(url=f"/cameras/{name}/zones", status_code=303)
 
@@ -275,6 +291,24 @@ async def reload_zones(
         raise HTTPException(status_code=500, detail=f"Failed to reload detectors: {exc}") from exc
 
     return JSONResponse({"ok": True, "camera": name})
+
+
+def _write_failed(request: Request, name: str, config_path: Path, exc: OSError) -> Response:
+    """Answer a zone save or delete whose config.yaml write failed (R9: never a 500).
+
+    A plain form post gets a 303 back to the zones page with an error flash. The zone
+    editor posts with htmx, and an XHR follows a 303 without a full page load, so it
+    gets ``HX-Redirect`` instead and the reloaded page shows the flash.
+    """
+    log.warning("could not write the zones of camera %s to %s: %s", name, config_path, exc)
+    url = f"/cameras/{name}/zones"
+    response: Response
+    if is_htmx(request):
+        response = Response(status_code=200, headers={"HX-Redirect": url})
+    else:
+        response = RedirectResponse(url=url, status_code=303)
+    set_flash(response, f"Could not write {config_path}: {exc.strerror or exc}.", "error")
+    return response
 
 
 def _persist_zones(config_path: Path, cfg: AppConfig) -> None:

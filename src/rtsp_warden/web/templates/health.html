@@ -2,7 +2,8 @@
 {% block title %}Health{% endblock %}
 
 {% block content %}
-<h1>System Health</h1>
+{% set title = "System Health" %}
+{% include "partials/page_header.html" %}
 
 <article>
   <header>Status</header>

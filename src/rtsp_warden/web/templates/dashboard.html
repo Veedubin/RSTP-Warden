@@ -2,7 +2,8 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
+{% set title = "Dashboard" %}
+{% include "partials/page_header.html" %}
 
 {# Stat cards row #}
 <div class="grid">

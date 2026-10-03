@@ -636,3 +636,98 @@ class TestDetailPageZoneLink:
         assert r.status_code == 200
         assert "/cameras/front_door/zones" in r.text
         assert "detection zones" in r.text.lower()
+
+
+class TestZoneWriteErrors:
+    """R9: a config.yaml that cannot be written is a flash message naming it, never a 500."""
+
+    @staticmethod
+    def _save(client: TestClient, **headers: str):
+        csrf = client.cookies.get("warden_csrf", "")
+        return client.post(
+            "/cameras/backyard/zones",
+            data={
+                "zone_name": "test zone",
+                "grid_cols": "8",
+                "grid_rows": "8",
+                "frame_width": "1920",
+                "frame_height": "1080",
+                "blocked_cell": ["0,0"],
+                "csrf_token": csrf,
+            },
+            headers={"X-CSRF-Token": csrf, **headers},
+            follow_redirects=False,
+        )
+
+    @staticmethod
+    def _refuse(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", "/etc/rtsp-warden/config.yaml")
+
+    def test_save_write_error_flashes_and_keeps_the_zones(
+        self, client_with_zones: TestClient, app_with_zones: tuple, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("rtsp_warden.web.routes.zones._persist_zones", self._refuse)
+        _, cfg = app_with_zones
+        r = self._save(client_with_zones)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/cameras/backyard/zones"
+        assert any(c.startswith("warden_flash=") for c in r.headers.get_list("set-cookie"))
+        backyard = next(c for c in cfg.cameras if c.name == "backyard")
+        assert backyard.zones == []
+        page = client_with_zones.get("/cameras/backyard/zones").text
+        assert "Could not write" in page
+        assert "Permission denied" in page
+
+    def test_htmx_save_write_error_reloads_the_page_to_show_it(
+        self, client_with_zones: TestClient, monkeypatch
+    ) -> None:
+        """The editor posts with htmx; an XHR would follow a 303 and never show the flash."""
+        monkeypatch.setattr("rtsp_warden.web.routes.zones._persist_zones", self._refuse)
+        r = self._save(client_with_zones, **{"HX-Request": "true"})
+        assert r.status_code == 200
+        assert r.headers["HX-Redirect"] == "/cameras/backyard/zones"
+        assert any(c.startswith("warden_flash=") for c in r.headers.get_list("set-cookie"))
+
+    def test_delete_write_error_flashes_and_keeps_the_zone(
+        self, client_with_zones: TestClient, app_with_zones: tuple, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("rtsp_warden.web.routes.zones._persist_zones", self._refuse)
+        _, cfg = app_with_zones
+        csrf = client_with_zones.cookies.get("warden_csrf", "")
+        r = client_with_zones.post(
+            "/cameras/front_door/zones/exclude road/delete",
+            data={"csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        front = next(c for c in cfg.cameras if c.name == "front_door")
+        assert [z.name for z in front.zones] == ["exclude road", "ignore neighbors"]
+        assert "Could not write" in client_with_zones.get("/cameras/front_door/zones").text
+
+    def test_save_into_a_read_only_config_dir(
+        self, client_with_zones: TestClient, app_with_zones: tuple, config_with_zones: Path
+    ) -> None:
+        app, _ = app_with_zones
+        conf_dir = config_with_zones.parent / "conf"
+        conf_dir.mkdir()
+        config_file = conf_dir / "config.yaml"
+        config_file.write_text(config_with_zones.read_text(encoding="utf-8"), encoding="utf-8")
+        app.state.config_path = str(config_file)
+        before = config_file.read_text(encoding="utf-8")
+        conf_dir.chmod(0o500)
+        probe_file = conf_dir / ".probe"
+        try:
+            try:
+                probe_file.touch()
+            except PermissionError:
+                pass
+            else:
+                probe_file.unlink()
+                pytest.skip("directory is still writable for this user")
+            r = self._save(client_with_zones)
+        finally:
+            conf_dir.chmod(0o700)
+        assert r.status_code == 303
+        assert config_file.read_text(encoding="utf-8") == before
+        assert str(config_file) in client_with_zones.get("/cameras/backyard/zones").text
