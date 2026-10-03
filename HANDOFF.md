@@ -2,6 +2,34 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
+## 2026-10-02 (evening) — START HERE: RW-0 landed on master; RW-2 and RW-3 being built in parallel worktrees
+
+**Where things are.** `master` at `b2ca2a5`: RW-1 + RW-0 (`dcaf660` hygiene, `19c075b` per-camera lifecycle API on
+`AppRuntime`: `request_add_camera` / `request_remove_camera` / `request_restart_camera` futures drained by the supervisor,
+`CameraExistsError` / `CameraNotFoundError`, `proxy_error`) + the three plans in `docs/superpowers/plans/`
+(`2026-10-02-rw0-prefork.md`, `2026-10-02-ui-pass.md`, `2026-10-02-detection.md`) and the rulings file
+`2026-10-02-rw2-rw3-decisions.md`. 877 tests, ruff baseline 7 E501, format clean. Nothing pushed.
+Worktrees: `.worktrees/rw-2` = branch `feat/ui-pass` (RW-2, 11 tasks + skipped manual task 12), `.worktrees/rw-3` =
+branch `feat/detection` (RW-3, 18 tasks + skipped manual task 19), both forked from `19c075b`, each with its own `.venv`.
+One implementer agent per worktree was dispatched 2026-10-02 ~20:30 local; check `git -C .worktrees/rw-N log --oneline`
+for progress (one commit per task).
+
+**What happened.** Planning session: 13 codebase readers + critic + 20 gap readers mapped the code (maps were in the
+session scratchpad, not the repo); the maps proved several spec premises false (frame tap never reaches detectors in a
+default `serve`, `pipe:3` fd bug, shared dispatcher fans every camera's frames to every runner, motion has no debounce,
+zones are exclusion masks only, clips regex already fixed, `/status.json` leaks ffmpeg stderr with credentials
+unauthenticated). Rulings R1-R22 in the decisions file replace those spec sentences. The owner stopped the plan-review
+workflow for cost reasons and ordered the build; Critical/Important review findings that had landed were handed to the
+implementers. Owner has NOT individually approved the rulings; they are recommended defaults.
+
+**Next, in order.**
+1. When both implementers finish: merge `feat/ui-pass` into `master` first, then rebase/merge `feat/detection` on top
+   (expected conflicts: `config.py`, `web/app.py`, `base.html`, `dashboard.html`, `cameras/detail.html`, `warden.css`,
+   `web/services/cameras.py`, `README.md`, `CLAUDE.md`, `cli.py`, `uv.lock`; RW-2 wins on layout, RW-3 on content).
+2. Full gate on master; one whole-branch review (owner said no more review agents mid-build; ask before spending).
+3. Manual Foscam tests (plan tasks RW-2/12 and RW-3/19) only when the owner says so; push only with explicit OK.
+4. Owner still needs to rotate the Foscam password in origin history.
+
 ## 2026-10-02 (afternoon) — START HERE: RW-1 Stabilize merged to local master (not pushed); RW-2 UI pass and RW-3 Detection are planned-in-spec only, owner wants both built in parallel with sub-agents in a fresh session
 
 **Where things are.** Single checkout `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`, branch `master` at
