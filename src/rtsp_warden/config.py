@@ -282,6 +282,7 @@ class CameraConfig(BaseModel):
     name: str
     main_url: str
     sub_url: str | None = None  # optional; every sub-stream consumer falls back to main
+    onvif_port: int | None = None  # ONVIF device-service port; None means 80
 
     record: RecordConfig = Field(default_factory=RecordConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
@@ -302,6 +303,13 @@ class CameraConfig(BaseModel):
         if not v2:
             raise ValueError("name must be non-empty")
         return v2
+
+    @field_validator("onvif_port")
+    @classmethod
+    def _onvif_port_valid(cls, v: int | None) -> int | None:
+        if v is not None and not 1 <= v <= 65535:
+            raise ValueError("onvif_port must be between 1 and 65535")
+        return v
 
     @field_validator("sensitivity")
     @classmethod
