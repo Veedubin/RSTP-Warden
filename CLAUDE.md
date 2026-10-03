@@ -16,7 +16,7 @@ code and fix the README. This file covers what the README does not say.
 ## Commands
 
 ```bash
-uv sync                          # installs runtime + dev group (pytest, pytest-cov, pytest-asyncio)
+uv sync                          # installs runtime (incl. onnxruntime CPU) + dev group (pytest, pytest-cov, pytest-asyncio, onnx)
 uv run pytest                    # ~820 tests, ~70s, fully offline (no ffmpeg, cameras, or network)
 uv run pytest tests/test_X.py    # one file
 uv run pytest -k "pattern"       # by name
@@ -26,6 +26,15 @@ uv run mypy src/                 # informal only: ~35 errors, not a gate
 ```
 
 `ruff` and `mypy` are not in the dev group; `uv run` finds them on the global PATH.
+
+**ONNX Runtime and the GPU venv.** `onnxruntime` (CPU) is a core dependency, `onnxruntime-gpu[cuda,cudnn]` is the
+`gpu` extra, and `onnx` (test graphs only) is in the dev group. The CPU and GPU builds install the same `onnxruntime/`
+package, so never let both into one venv. Switch to GPU with
+`uv sync --extra gpu --no-install-package onnxruntime --reinstall-package onnxruntime-gpu`, then use
+`uv run --no-sync ...` (or `UV_NO_SYNC=1`): a plain `uv run` reinstalls the CPU build over it. Back to CPU:
+`uv sync --reinstall-package onnxruntime`. `uv run --no-sync pytest -m gpu` checks that CUDA really loads, and
+`tests/test_onnxruntime_install.py` fails when both builds are installed. The Python floor is 3.11 while ruff
+`target-version` stays `py310` on purpose (py311 adds 83 UP017/UP042 errors).
 
 **Lint baseline.** The 10 E501 errors live in `app.py`, `cli.py`, `proxy/mjpeg.py`,
 `recorder.py`, `retention.py`, and `tests/test_frame_tap_wiring.py`. The gate is "no new ruff errors"; do not reformat

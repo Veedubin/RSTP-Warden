@@ -39,6 +39,8 @@ rtsp-warden targets homelab/self-hosters who want a feature-complete NVR with a 
 
 ### Option A: pip (any Linux)
 
+Needs Python 3.11 or newer (ONNX Runtime, a core dependency, ships no Python 3.10 wheels after 1.23).
+
 ```bash
 # 1. Install
 pip install rtsp-warden
@@ -402,7 +404,7 @@ The unit is hardened: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, 
 git clone https://github.com/Veedubin/RSTP-Warden.git
 cd RSTP-Warden
 
-# Install runtime + dev dependency group (uses uv)
+# Install runtime + dev dependency group (uses uv; needs Python 3.11+, uv downloads one if missing)
 uv sync
 
 # Run tests
