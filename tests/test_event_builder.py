@@ -580,3 +580,105 @@ def test_stationary_check_is_off_by_default_and_without_a_first_bbox(tmp_path: P
 def test_stationary_iou_outside_zero_to_one_is_rejected(tmp_path: Path, value: float) -> None:
     with pytest.raises(ValueError):
         _builder(tmp_path, FakeDb(), stationary_iou=value)
+
+
+# ---------------------------------------------------------------------------
+# Full-size thumbnails (RW-4): the box is drawn on the preview frame nearest the best time
+# ---------------------------------------------------------------------------
+
+
+def _jpeg(width: int, height: int) -> bytes:
+    ok, buf = cv2.imencode(".jpg", np.full((height, width, 3), 40, dtype=np.uint8))
+    assert ok
+    return buf.tobytes()
+
+
+def _thumb(tmp_path: Path, event_id: int) -> np.ndarray:
+    image = cv2.imread(str(tmp_path / "yard" / "thumbnails" / f"{event_id}.jpg"))
+    assert image is not None
+    return image
+
+
+def _is_green(pixel: np.ndarray) -> bool:
+    b, g, r = (int(v) for v in pixel)
+    return g > 150 and r < 100 and b < 100
+
+
+def test_thumbnail_uses_the_full_frame_near_the_best_time_with_the_box_scaled(
+    tmp_path: Path,
+) -> None:
+    asked: list[float] = []
+
+    def source(ts: float) -> tuple[bytes, float] | None:
+        asked.append(ts)
+        return (_jpeg(640, 360), ts - 0.1)
+
+    db = FakeDb()
+    builder = _builder(tmp_path, db, frame_source=source)
+    track = _track(bbox=(100, 50, 40, 60))  # in the 320x180 tap frame
+
+    builder.on_tracks(_update(opened=(track,)), SHAPE)
+
+    assert asked == [10.2]  # track.best_ts
+    event_id = db.of("insert")[0][1]
+    image = _thumb(tmp_path, event_id)
+    assert image.shape[:2] == (360, 640)
+    assert _is_green(image[100, 240])  # top edge of the box, scaled x2
+    assert _is_green(image[160, 200])  # left edge
+    assert not _is_green(image[50, 120])  # where the unscaled box would have been
+    # The row still describes the detection frame.
+    assert db.of("insert")[0][2]["metadata"] == {
+        "bbox": [100, 50, 40, 60],
+        "frame_size": [320, 180],
+    }
+
+
+def test_thumbnail_falls_back_to_the_tap_frame_without_a_full_frame(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db, frame_source=lambda ts: None)
+    builder.on_tracks(_update(opened=(_track(),)), SHAPE)
+
+    image = _thumb(tmp_path, db.of("insert")[0][1])
+    assert image.shape[:2] == (180, 320)
+    assert _is_green(image[50, 120])
+
+
+def test_thumbnail_ignores_a_full_frame_no_wider_than_the_tap_frame(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db, frame_source=lambda ts: (_jpeg(320, 180), ts))
+    builder.on_tracks(_update(opened=(_track(),)), SHAPE)
+
+    image = _thumb(tmp_path, db.of("insert")[0][1])
+    assert image.shape[:2] == (180, 320)
+
+
+def test_improvement_keeps_the_full_size_thumbnail_when_no_full_frame_matches(
+    tmp_path: Path,
+) -> None:
+    frames: list[tuple[bytes, float] | None] = [(_jpeg(640, 360), 10.2), None]
+    db = FakeDb()
+    builder = _builder(tmp_path, db, frame_source=lambda ts: frames.pop(0))
+    track = _track()
+    builder.on_tracks(_update(opened=(track,)), SHAPE)
+    event_id = db.of("insert")[0][1]
+    before = (tmp_path / "yard" / "thumbnails" / f"{event_id}.jpg").read_bytes()
+
+    track.best_confidence = 0.95
+    track.best_ts = 11.5
+    track.last_seen = 11.5
+    builder.on_tracks(_update(improved=(track,)), SHAPE)
+
+    assert _confidence_writes(db)[-1][2]["confidence"] == pytest.approx(0.95)
+    assert (tmp_path / "yard" / "thumbnails" / f"{event_id}.jpg").read_bytes() == before
+    assert _thumb(tmp_path, event_id).shape[:2] == (360, 640)
+
+
+def test_frame_source_errors_fall_back_to_the_tap_frame(tmp_path: Path) -> None:
+    def broken(ts: float) -> tuple[bytes, float] | None:
+        raise RuntimeError("hub gone")
+
+    db = FakeDb()
+    builder = _builder(tmp_path, db, frame_source=broken)
+    builder.on_tracks(_update(opened=(_track(),)), SHAPE)
+
+    assert _thumb(tmp_path, db.of("insert")[0][1]).shape[:2] == (180, 320)

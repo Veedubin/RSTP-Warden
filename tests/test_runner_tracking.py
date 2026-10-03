@@ -643,9 +643,10 @@ def test_motion_events_flag_resolves_per_camera(tmp_path: Path) -> None:
 
 
 def _walk_in_then_stand(ts: float) -> list[Detection]:
-    """A person walks in from the left for 2 s, then stands at PERSON_BOX."""
-    if ts < 2.0:
-        x = 20 + int(40 * ts)
+    """A person walks in from the left (10 px per frame, so the tracker follows), then
+    stands at PERSON_BOX from 8 s on."""
+    if ts < 8.0:
+        x = 20 + int(10 * ts)
         return [Detection(kind="person", confidence=0.9, bbox=(x, 50, 40, 60))]
     return [Detection(kind="person", confidence=0.9, bbox=PERSON_BOX)]
 
@@ -687,7 +688,9 @@ def test_person_who_walks_in_and_then_stands_still_is_one_event(tmp_path: Path) 
 
     inserts = db.of("insert")
     assert len(inserts) == 1
-    assert inserts[0][2]["created_at"] == _utc(1.0)  # the frame on which it had moved
+    # Opened on the frame where the box no longer overlapped its first box by 0.6:
+    # x=20 -> x=40 (frame 2), not on frame 1 (x=30, IoU exactly 0.6, still "in place").
+    assert inserts[0][2]["created_at"] == _utc(2.0)
     assert runner.status()["stationary_held"] == 0
     runner.teardown()
     assert len(db.of("close")) == 1

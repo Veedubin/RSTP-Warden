@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,25 +19,59 @@ class FrameHub:
     """Thread-safe 'latest frame' store.
 
     This is the fanout boundary between ingest (producer) and MJPEG proxy (consumers).
+
+    It also keeps a short, sparse history (at most one frame per ``history_interval_s``,
+    none older than ``history_seconds``) so the EventBuilder can fetch the full-size frame
+    nearest a detection's time for its thumbnail (``frame_near``); the detector itself only
+    sees the small tap frame. At 5 frames/s for 5 s that is about 25 JPEGs per camera.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, history_seconds: float = 5.0, history_interval_s: float = 0.2) -> None:
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._jpeg: bytes | None = None
         self._frame_id: int = 0
         self._ts: float = 0.0
+        self.history_seconds = float(history_seconds)
+        self.history_interval_s = float(history_interval_s)
+        self._history: deque[tuple[float, bytes]] = deque()
 
-    def update(self, jpeg_bytes: bytes) -> None:
+    def update(self, jpeg_bytes: bytes, ts_unix: float | None = None) -> None:
+        """Publish a new frame; ``ts_unix`` is for tests (production uses the wall clock)."""
+        ts = time.time() if ts_unix is None else float(ts_unix)
         with self._cond:
             self._jpeg = jpeg_bytes
             self._frame_id += 1
-            self._ts = time.time()
+            self._ts = ts
+            if not self._history or ts - self._history[-1][0] >= self.history_interval_s:
+                self._history.append((ts, jpeg_bytes))
+            cutoff = ts - self.history_seconds
+            while self._history and self._history[0][0] < cutoff:
+                self._history.popleft()
             self._cond.notify_all()
 
     def snapshot(self) -> tuple[bytes | None, int, float]:
         with self._lock:
             return self._jpeg, self._frame_id, self._ts
+
+    @property
+    def history_len(self) -> int:
+        with self._lock:
+            return len(self._history)
+
+    def frame_near(
+        self, ts_unix: float, *, tolerance_s: float = 0.75
+    ) -> tuple[bytes, float] | None:
+        """The kept frame closest to ``ts_unix`` as ``(jpeg, ts)``, or None when none is
+        within ``tolerance_s`` seconds. Safe to call from any thread."""
+        target = float(ts_unix)
+        with self._lock:
+            if not self._history:
+                return None
+            ts, jpeg = min(self._history, key=lambda item: abs(item[0] - target))
+        if abs(ts - target) > tolerance_s:
+            return None
+        return jpeg, ts
 
     def wait_for_new(self, last_id: int, timeout: float = 2.0) -> tuple[bytes | None, int, float]:
         end = time.time() + timeout

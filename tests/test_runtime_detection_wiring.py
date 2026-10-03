@@ -778,3 +778,29 @@ def test_build_hands_the_camera_stationary_iou_to_its_event_builder(
     runner = rt.find_runner("front")
     assert runner is not None and runner.event_builder is not None
     assert runner.event_builder.stationary_iou == 0.4
+
+
+def test_build_gives_the_event_builder_the_camera_hub_as_its_full_frame_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup: Callable[[AppRuntime], None]
+) -> None:
+    install_stub_onnx(monkeypatch)
+    with_hub = camera(
+        "front",
+        tmp_path,
+        detectors=[ONNX],
+        proxy={"enabled": True, "mode": "mjpeg", "port": 9741, "stream": "main"},
+    )
+    without = camera("back", tmp_path, detectors=[ONNX])
+    rt = make_runtime(tmp_path, [with_hub, without], actions=())
+    cleanup(rt)
+
+    rt.build()
+
+    front = rt.find_runner("front")
+    back = rt.find_runner("back")
+    assert front is not None and front.event_builder is not None
+    assert back is not None and back.event_builder is not None
+    hub = rt.find_camera("front").hub
+    assert hub is not None
+    assert front.event_builder.frame_source == hub.frame_near
+    assert back.event_builder.frame_source is None

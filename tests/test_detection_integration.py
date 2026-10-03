@@ -11,6 +11,7 @@ camera, ffmpeg process, network or model weights are involved.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +23,8 @@ from rtsp_warden.db import schema as db_schema
 from tests.helpers_runtime import (
     ONNX,
     PERSON_RULE,
+    STEP,
+    T0,
     RecordingAction,
     camera,
     feed,
@@ -55,6 +58,9 @@ def wired(
         detect_fps=5,
         track_grace_seconds=3.0,
         min_track_frames=2,
+        # The stub person drifts 4 px per frame; this test is about the pipeline, not about
+        # stationary suppression (test_the_default_holds_a_slow_object_until_it_has_moved).
+        stationary_iou=0,
         detectors=[ONNX],
         rules=[PERSON_RULE],
     )
@@ -125,3 +131,31 @@ def test_one_person_walking_past_is_one_event_one_thumbnail_one_action_run_and_o
     back = rt.find_runner("back")
     assert back is not None and back.status()["frames_processed"] == 0
     assert db_schema.list_events(camera_name="back") == []
+
+
+def test_the_default_holds_a_slow_object_until_it_has_moved(
+    clean_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With stationary_iou at its default (0.6) the 4 px/frame stub person is held on
+    frame 1 (IoU 0.88 with its first box) and opens on frame 4 (IoU 0.58), with that
+    frame's time as the event start."""
+    install_stub_onnx(monkeypatch)
+    monkeypatch.setattr(app_mod, "build_actions", lambda cfg: {})
+    rt = make_runtime(tmp_path, [camera("front", tmp_path, detectors=[ONNX])], actions=())
+    rt.build()
+    try:
+        for step in range(4):
+            feed(rt, "front", step)
+        assert db_schema.list_events(camera_name="front") == []
+        assert rt.detection_status("front")["stationary_held"] == 1
+
+        feed(rt, "front", 4)
+
+        rows = db_schema.list_events(camera_name="front")
+        assert len(rows) == 1
+        assert db_schema.as_utc(rows[0].created_at) == datetime.fromtimestamp(
+            T0 + 4 * STEP, tz=timezone.utc
+        )
+        assert rt.detection_status("front")["stationary_held"] == 0
+    finally:
+        rt.stop_all()

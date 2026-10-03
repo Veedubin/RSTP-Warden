@@ -24,6 +24,13 @@ frame's time, and a held track that closes first is dropped silently. ``held_cou
 ``suppressed_total`` report both for the status surfaces. A track without ``first_bbox``
 (hand-built in tests) is never held.
 
+Thumbnails (RW-4): with a ``frame_source`` (the camera FrameHub's ``frame_near``), the
+thumbnail is the full-size preview frame nearest the track's ``best_ts`` with the best box
+scaled onto it, when that frame is wider than the tap frame; otherwise it is the tap frame
+the detector saw. A rewrite never replaces a full-size thumbnail with a tap-size one: when
+no full-size frame matches the new best time, the old image is kept and only the row is
+updated. The row's ``bbox`` and ``frame_size`` always describe the tap frame.
+
 Motion events (``event_type="motion"``, ``label="motion"``): one row per burst (see
 ``MotionBurst``), confidence 1.0, empty zone, no thumbnail.
 
@@ -106,6 +113,10 @@ class _OpenEvent:
     track: Any  # tracking.Track; kept to read last_seen and best_* on flush and close
     last_write_ts: float
     dirty: bool = False
+    full_res: bool = False  # the thumbnail on disk came from a full-size frame
+
+
+FrameSource = Callable[[float], "tuple[bytes, float] | None"]
 
 
 def _utc(ts_unix: float) -> datetime:
@@ -131,6 +142,7 @@ class EventBuilder:
         update_min_interval_s: float = 1.0,
         db: Any = _schema,
         stationary_iou: float = 0.0,
+        frame_source: FrameSource | None = None,
     ) -> None:
         if not 0.0 <= float(stationary_iou) <= 1.0:
             raise ValueError(f"stationary_iou must be between 0 and 1, got {stationary_iou}")
@@ -142,6 +154,7 @@ class EventBuilder:
         self.update_min_interval_s = float(update_min_interval_s)
         self._db = db
         self.stationary_iou = float(stationary_iou)
+        self.frame_source = frame_source
         self._lock = threading.Lock()
         self._closed = False
         self._open: dict[int, _OpenEvent] = {}
@@ -316,7 +329,7 @@ class EventBuilder:
                 "failed to insert event for %s label=%s", self.camera, track.label, exc_info=True
             )
             return False
-        thumbnail = self._write_track_thumbnail(event_id, track)
+        thumbnail, full_res = self._write_track_thumbnail(event_id, track)
         if thumbnail is not None:
             try:
                 self._db.update_event(event_id, thumbnail_path=thumbnail)
@@ -339,21 +352,72 @@ class EventBuilder:
             event_type=OBJECT_EVENT_TYPE,
         )
         self._open[track.id] = _OpenEvent(
-            info=info, track=track, last_write_ts=float(track.last_seen)
+            info=info,
+            track=track,
+            last_write_ts=float(track.last_seen),
+            full_res=thumbnail is not None and full_res,
         )
         self._notify(self.on_open, info)
         return True
 
-    def _write_track_thumbnail(self, event_id: int, track: Track) -> str | None:
-        if track.best_frame is None:
+    def _full_frame(self, track: Track) -> tuple[np.ndarray, tuple[int, int, int, int]] | None:
+        """The full-size frame nearest ``track.best_ts`` with ``best_bbox`` scaled onto it.
+
+        None without a frame source, without a matching frame, when the frame does not
+        decode or is no wider than the tap frame, or when the source raises.
+        """
+        if self.frame_source is None:
             return None
-        rel_path = self.thumbnail_rel_path(self.camera, event_id)
+        if track.best_frame is not None:
+            src_h, src_w = int(track.best_frame.shape[0]), int(track.best_frame.shape[1])
+        else:
+            src_h, src_w = self._frame_h, self._frame_w
+        if src_w <= 0 or src_h <= 0:
+            return None
         try:
-            self.write_thumbnail(rel_path, track.best_frame, track.best_bbox)
+            got = self.frame_source(float(track.best_ts))
+            if not got:
+                return None
+            image = cv2.imdecode(np.frombuffer(got[0], dtype=np.uint8), cv2.IMREAD_COLOR)
+        except Exception:
+            log.debug("full-size frame for %s unavailable", self.camera, exc_info=True)
+            return None
+        if image is None or image.shape[1] <= src_w:
+            return None
+        full_h, full_w = int(image.shape[0]), int(image.shape[1])
+        sx, sy = full_w / src_w, full_h / src_h
+        x, y, w, h = _bbox(track.best_bbox)
+        return image, (
+            int(round(x * sx)),
+            int(round(y * sy)),
+            int(round(w * sx)),
+            int(round(h * sy)),
+        )
+
+    def _write_track_thumbnail(
+        self, event_id: int, track: Track, state: _OpenEvent | None = None
+    ) -> tuple[str | None, bool]:
+        """Write the event's thumbnail; returns ``(relative path, full_res)``.
+
+        ``state`` is the open event on a rewrite: when it already has a full-size thumbnail
+        and no full-size frame matches now, the file is left alone and its path returned.
+        """
+        rel_path = self.thumbnail_rel_path(self.camera, event_id)
+        full = self._full_frame(track)
+        if full is not None:
+            image, bbox = full
+        elif state is not None and state.full_res and state.info.thumbnail_path is not None:
+            return state.info.thumbnail_path, True
+        elif track.best_frame is not None:
+            image, bbox = track.best_frame, track.best_bbox
+        else:
+            return None, False
+        try:
+            self.write_thumbnail(rel_path, image, bbox)
         except Exception:
             log.warning("failed to write thumbnail %s", rel_path, exc_info=True)
-            return None
-        return rel_path
+            return None, False
+        return rel_path, full is not None
 
     def _refreshed_fields(self, state: _OpenEvent) -> dict[str, Any]:
         track = state.track
@@ -361,9 +425,11 @@ class EventBuilder:
             "confidence": float(track.best_confidence),
             "zone": self._zone(track.best_bbox),
         }
-        thumbnail = self._write_track_thumbnail(state.info.id, track)
-        if thumbnail is not None and state.info.thumbnail_path is None:
-            fields["thumbnail_path"] = thumbnail
+        thumbnail, full_res = self._write_track_thumbnail(state.info.id, track, state)
+        if thumbnail is not None:
+            state.full_res = full_res
+            if state.info.thumbnail_path is None:
+                fields["thumbnail_path"] = thumbnail
         return fields
 
     def _apply(self, state: _OpenEvent, fields: dict[str, Any]) -> None:

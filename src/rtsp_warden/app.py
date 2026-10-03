@@ -716,6 +716,10 @@ class AppRuntime:
         if self._event_sink is None:
             self._event_sink = EventSink()
         tap_fps, _tap_width = self.tap_settings_for(cam)
+        # Thumbnails come from the full-size preview frames when the camera has a FrameHub
+        # (proxy.mode mjpeg); the hub survives restarts, so the bound method stays valid.
+        cam_rt = self.find_camera(cam.name)
+        hub = cam_rt.hub if cam_rt is not None else None
         event_builder = EventBuilder(
             camera=cam.name,
             output_dir=Path(cam.record.output_dir),
@@ -723,6 +727,7 @@ class AppRuntime:
             on_open=self._on_event_open,
             on_close=self._on_event_close,
             stationary_iou=cam.stationary_iou,
+            frame_source=hub.frame_near if hub is not None else None,
         )
         # One worker keeps each camera's frames in order (MOG2 and the tracker are stateful);
         # a short queue keeps drop-oldest meaning "freshest frame" when inference falls behind.
