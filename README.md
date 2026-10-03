@@ -121,6 +121,9 @@ cameras:
   - name: front-door
     main_url: rtsp://${CAM_FRONT_DOOR_USER}:${CAM_FRONT_DOOR_PASS}@192.168.1.60:554/stream1
     onvif_port: 8080
+    vendor:                                # optional: the camera's own HTTP API for the settings page
+      type: foscam                         # only foscam so far (its CGI, no browser plugin)
+      port: 88
     record:
       enabled: true
     proxy:
@@ -396,6 +399,10 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `POST /cameras/{name}/detection` | admin | Save `detect_fps`, `track_grace_seconds`, `min_track_frames` and `stationary_iou` (a new `detect_fps` restarts the camera's ingest) |
 | `POST /cameras/{name}/rules/test` | admin | "Fire test event": a synthetic `person` event through the camera's real rules and actions |
 | `GET /cameras/{name}/live-boxes.mjpeg` | user | Live MJPEG with the tracker's current boxes drawn (the "show boxes" switch) |
+| `GET /cameras/{name}/vendor` | admin | Camera settings page: device info, stream profiles, image tuning, mirror / flip, infrared, OSD, snapshot and reboot through the camera's own HTTP API (Foscam CGI) |
+| `POST /cameras/{name}/vendor/enable`, `POST /cameras/{name}/vendor/disable` | admin | Write or remove the camera's `vendor:` block (type, port) in config.yaml |
+| `POST /cameras/{name}/vendor/stream`, `POST /cameras/{name}/vendor/image`, `POST /cameras/{name}/vendor/video` | admin | Switch or edit a stream profile; set brightness, contrast, hue, saturation, sharpness, denoise; set mirror, flip, infrared and on-screen text (htmx fragments) |
+| `GET /cameras/{name}/vendor/snapshot.jpg`, `POST /cameras/{name}/vendor/reboot` | admin | A still taken by the camera itself; reboot the camera |
 | `POST /cameras/{name}/reload` | admin | Rebuild that camera's detectors from the in-memory config (no YAML re-read; restarts ingest only when the frame-tap settings change) |
 | `GET /events` | user | Event cards (thumbnail, label, confidence, camera, zone, time) with camera, label and date filters; htmx refresh |
 | `GET /events/{id}` | user | Event detail: full thumbnail, clip player, action runs |
@@ -572,6 +579,20 @@ Each run is stored in `action_runs` and shown on the event's page and, as last r
 - **Stream URLs:** **Find stream URLs (ONVIF)** on the add-camera form calls `GetStreamUri` (WS-UsernameToken login) on ports 80, 8080, 888 and 2020 and fills in the port that answered as the camera's `onvif_port`. See [Adding a camera](#adding-a-camera).
 - **PTZ:** absolute_move, continuous_move, stop, from the PTZ pad on the ONVIF page. PTZ and event calls go to `http://<host of main_url>:<onvif_port>/onvif/device_service` (`onvif_port` defaults to 80) with the global `onvif.username` / `onvif.password` over HTTP Digest auth. Presets are saved in `config.yaml` under `camera.presets`; a save changes only that camera's `presets` list in the raw YAML, so `${VAR}` references in the file survive.
 - **Events:** pull-point subscription over SOAP, started manually from the ONVIF page. Received events are logged; they are not yet turned into alerts.
+
+### Camera settings (Foscam)
+
+Foscam's own web page needs an ActiveX / NPAPI plugin that no current browser runs, but the plugin only decodes live video: every setting on that page is a plain HTTP call to the camera's documented CGI (`http://<camera>:88/cgi-bin/CGIProxy.fcgi?cmd=...`). rtsp-warden already shows the live video, so **Camera settings** on a camera's page (`/cameras/{name}/vendor`) replaces the rest: device info, the four profiles of the main and sub stream (resolution, bit rate, frame rate, GOP, constant or variable rate) with the one the camera plays, image tuning (brightness, contrast, hue, saturation, sharpness, denoise), mirror and flip, the infrared night light (automatic, or manual on / off), the on-screen time stamp and name, a snapshot taken by the camera, and a reboot button.
+
+Turn it on per camera with a `vendor:` block (the page offers the form; it writes only that key of the camera's YAML entry):
+
+```yaml
+    vendor:
+      type: foscam
+      port: 88
+```
+
+The calls use the credentials of `main_url` (the same account as RTSP) and go to its host. What the camera answers, including a rejected login, is shown on the page; nothing is logged or displayed with the URL or the credentials. Resolution codes are the camera's own (0 = 1280x720 and 3 = 640x360 on a C1 V3; others are shown as numbers). Other vendors can be added under `vendors/`.
 
 ### Clips
 

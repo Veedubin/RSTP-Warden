@@ -33,6 +33,7 @@ from .routes.onvif import router as onvif_router
 from .routes.settings import router as settings_router
 from .routes.tokens import router as tokens_router
 from .routes.users import router as users_router
+from .routes.vendor import router as vendor_router
 from .routes.zones import router as zones_router
 from .session import install_security
 
@@ -111,6 +112,7 @@ def create_app(
     app.include_router(settings_router)
     app.include_router(actions_router)
     app.include_router(onvif_router)
+    app.include_router(vendor_router)
     app.include_router(zones_router)
 
     return app

@@ -438,6 +438,25 @@ class RuleConfig(BaseModel):
         return v
 
 
+class VendorConfig(BaseModel):
+    """The camera's own HTTP API (RW-4): only Foscam's CGI (``/cgi-bin/CGIProxy.fcgi``) so far.
+
+    The web UI's camera-settings page talks to ``http://<main_url host>:<port>`` with the
+    credentials of ``main_url``. Foscam's web page needs a browser plugin only for live video;
+    every setting goes through this API.
+    """
+
+    type: Literal["foscam"]
+    port: int = 88
+
+    @field_validator("port")
+    @classmethod
+    def _port_valid(cls, v: int) -> int:
+        if not 1 <= v <= 65535:
+            raise ValueError("vendor.port must be between 1 and 65535")
+        return v
+
+
 class CameraConfig(BaseModel):
     # Errors name the camera and zone in their text; never echo the input (it holds URLs).
     model_config = {"hide_input_in_errors": True}
@@ -446,6 +465,7 @@ class CameraConfig(BaseModel):
     main_url: str
     sub_url: str | None = None  # optional; every sub-stream consumer falls back to main
     onvif_port: int | None = None  # ONVIF device-service port; None means 80
+    vendor: VendorConfig | None = None  # the camera's own HTTP API for the settings page
 
     record: RecordConfig = Field(default_factory=RecordConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)

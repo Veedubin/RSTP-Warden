@@ -1,0 +1,44 @@
+{# Mirror / flip, infrared and OSD. Context: camera, video = {video, message, error}. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+<article id="vendor-video">
+  <header><strong>Picture, infrared and on-screen text</strong></header>
+  {% if video.message %}<p class="flash flash-success" role="status">{{ video.message }}</p>{% endif %}
+  {% if video.error %}<p class="flash flash-error" role="alert">{{ video.error }}</p>{% endif %}
+  {% if video.video %}
+  {% set v = video.video %}
+  <form method="post" action="/cameras/{{ camera.name }}/vendor/video"
+        hx-post="/cameras/{{ camera.name }}/vendor/video" hx-target="#vendor-video" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <fieldset>
+      <legend>Orientation</legend>
+      <label><input type="checkbox" name="mirror"{% if v.mirror %} checked{% endif %}> Mirror (left-right)</label>
+      <label><input type="checkbox" name="flip"{% if v.flip %} checked{% endif %}> Flip (upside down)</label>
+    </fieldset>
+    <fieldset>
+      <legend>Infrared night light</legend>
+      <div class="grid">
+        <label for="infrared-mode">Mode
+          <select id="infrared-mode" name="infrared_mode">
+            <option value="0"{% if v.infrared_mode == 0 %} selected{% endif %}>Automatic</option>
+            <option value="1"{% if v.infrared_mode == 1 %} selected{% endif %}>Manual</option>
+          </select>
+        </label>
+        <label><input type="checkbox" name="infrared_on"> Infrared on (manual mode only)</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>On-screen text</legend>
+      <label><input type="checkbox" name="osd_timestamp"{% if v.osd_timestamp %} checked{% endif %}> Time stamp</label>
+      <label><input type="checkbox" name="osd_name"{% if v.osd_name %} checked{% endif %}> Camera name</label>
+      <label for="osd-position">Position
+        <select id="osd-position" name="osd_position">
+          {% for pos, label in [(0, "Top left"), (1, "Top right"), (2, "Bottom left"), (3, "Bottom right")] %}
+          <option value="{{ pos }}"{% if v.osd_position == pos %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </fieldset>
+    <button type="submit">Save video settings</button>
+  </form>
+  {% endif %}
+</article>

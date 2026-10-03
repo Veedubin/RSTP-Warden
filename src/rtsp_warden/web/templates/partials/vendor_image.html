@@ -1,0 +1,21 @@
+{# Image tuning. Context: camera, image = {image, fields, message, error}. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+<article id="vendor-image">
+  <header><strong>Image</strong></header>
+  {% if image.message %}<p class="flash flash-success" role="status">{{ image.message }}</p>{% endif %}
+  {% if image.error %}<p class="flash flash-error" role="alert">{{ image.error }}</p>{% endif %}
+  {% if image.image %}
+  <form method="post" action="/cameras/{{ camera.name }}/vendor/image"
+        hx-post="/cameras/{{ camera.name }}/vendor/image" hx-target="#vendor-image" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% for field in image.fields %}
+    {% set value = image.image[field] %}
+    <label for="image-{{ field }}">{{ field|capitalize }}: <output>{{ value }}</output>
+      <input id="image-{{ field }}" name="{{ field }}" type="range" min="0" max="100" value="{{ value }}"
+             oninput="this.previousElementSibling.value = this.value">
+    </label>
+    {% endfor %}
+    <button type="submit">Save image settings</button>
+  </form>
+  {% endif %}
+</article>

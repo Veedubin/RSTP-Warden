@@ -8,6 +8,7 @@
 {% if is_admin %}
 <div class="page-actions" id="camera-actions">
   <a href="/cameras/{{ camera.name }}/edit" role="button" class="secondary outline">Edit camera</a>
+  <a href="/cameras/{{ camera.name }}/vendor" role="button" class="secondary outline">Camera settings</a>
   <form method="post" action="/cameras/{{ camera.name }}/delete" data-camera="{{ camera.name }}"
         onsubmit="return confirm('Delete camera ' + this.dataset.camera + '? It is removed from config.yaml and stops recording. Its recordings, thumbnails, clips and events stay on disk.')">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">

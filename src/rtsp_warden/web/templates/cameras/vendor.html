@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Camera settings: {{ camera.name }}{% endblock %}
+
+{% block content %}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+{% set title = "Camera settings: " ~ camera.name %}
+{% set subtitle = "The camera's own settings through its HTTP API. No browser plugin involved." %}
+{% include "partials/page_header.html" %}
+
+{% if not vendor %}
+<article id="vendor-enable">
+  <header><strong>Camera API</strong></header>
+  <p>This camera has no <code>vendor:</code> block in config.yaml yet. Turn the camera API on to
+    read and change its stream profiles, image tuning, mirror / flip, infrared and OSD from here.
+    The credentials of <code>main_url</code> are used; Foscam cameras answer on port 88.</p>
+  <form method="post" action="/cameras/{{ camera.name }}/vendor/enable">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="grid">
+      <label for="vendor-type">Vendor
+        <select id="vendor-type" name="vendor_type">
+          {% for t in vendor_types %}<option value="{{ t }}">{{ t|capitalize }} (HTTP CGI)</option>{% endfor %}
+        </select>
+      </label>
+      <label for="vendor-port">HTTP port
+        <input id="vendor-port" name="port" type="number" min="1" max="65535" required value="88">
+      </label>
+    </div>
+    <button type="submit">Enable the camera API</button>
+  </form>
+</article>
+{% else %}
+
+{% if page_error %}<p class="flash flash-error" role="alert">{{ page_error }}</p>{% endif %}
+
+<article id="vendor-device">
+  <header><strong>Device</strong> <small>({{ vendor.type }} CGI on port {{ vendor.port }})</small></header>
+  {% if device_error %}<p class="flash flash-error" role="alert">{{ device_error }}</p>{% endif %}
+  {% if device %}
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th scope="row">Product</th><td>{{ device.product }}</td></tr>
+        <tr><th scope="row">Firmware</th><td>{{ device.firmware }}</td></tr>
+        <tr><th scope="row">Hardware</th><td>{{ device.hardware }}</td></tr>
+        <tr><th scope="row">Name on the camera</th><td>{{ device.name }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if not page_error %}
+  <p><img src="/cameras/{{ camera.name }}/vendor/snapshot.jpg" alt="Snapshot from {{ camera.name }}"
+          loading="lazy" style="display:block; max-width:100%;"></p>
+  <p class="small">A still taken by the camera itself, not from the recorder.</p>
+  {% endif %}
+  <footer>
+    <form method="post" action="/cameras/{{ camera.name }}/vendor/disable" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="secondary outline">Disable the camera API</button>
+    </form>
+  </footer>
+</article>
+
+{% include "partials/vendor_stream.html" %}
+{% include "partials/vendor_image.html" %}
+{% include "partials/vendor_video.html" %}
+
+<article id="vendor-maintenance">
+  <header><strong>Maintenance</strong></header>
+  <div id="vendor-reboot-result"></div>
+  <form method="post" action="/cameras/{{ camera.name }}/vendor/reboot"
+        hx-post="/cameras/{{ camera.name }}/vendor/reboot" hx-target="#vendor-reboot-result" hx-swap="innerHTML"
+        onsubmit="return confirm('Reboot the camera? Recording stops until it is back.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button type="submit" class="contrast outline">Reboot the camera</button>
+  </form>
+</article>
+{% endif %}
+
+<p><a href="/cameras/{{ camera.name }}">&larr; Back to {{ camera.name }}</a></p>
+{% endblock %}

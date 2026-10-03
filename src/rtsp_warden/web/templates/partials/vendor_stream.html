@@ -1,0 +1,64 @@
+{# Stream profiles of one camera. Context: camera, stream = {streams, message, error, frame_rate_max}. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+<article id="vendor-stream">
+  <header><strong>Streams</strong></header>
+  {% if stream.message %}<p class="flash flash-success" role="status">{{ stream.message }}</p>{% endif %}
+  {% if stream.error %}<p class="flash flash-error" role="alert">{{ stream.error }}</p>{% endif %}
+  <p class="small">The camera keeps four profiles per stream and plays one of them. Pick a profile and
+    <em>Use</em> it, or edit the fields and <em>Save</em> them into the picked profile. Changing the
+    playing profile restarts the stream; rtsp-warden reconnects by itself.</p>
+  {% for s in stream.streams %}
+  <form method="post" action="/cameras/{{ camera.name }}/vendor/stream"
+        hx-post="/cameras/{{ camera.name }}/vendor/stream" hx-target="#vendor-stream" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="stream" value="{{ s.name }}">
+    <h4>{{ s.name|capitalize }} stream <small>(plays profile {{ s.active }})</small></h4>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Profile</th><th>Resolution</th><th>Bit rate</th><th>Frames/s</th><th>GOP</th><th>Rate</th></tr>
+        </thead>
+        <tbody>
+          {% for p in s.profiles %}
+          <tr>
+            <td><label><input type="radio" name="profile" value="{{ p.index }}"{% if p.index == s.active %} checked{% endif %}> {{ p.index }}</label></td>
+            <td>{{ p.resolution_label }}</td>
+            <td>{{ p.kbit }}</td>
+            <td>{{ p.frame_rate }}</td>
+            <td>{{ p.gop }}</td>
+            <td>{{ 'variable' if p.vbr else 'constant' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="submit" name="action" value="use">Use the picked profile</button>
+    <details>
+      <summary>Edit the picked profile</summary>
+      {% set cur = s.current %}
+      <div class="grid">
+        <label>Resolution code
+          <input name="resolution" type="number" min="0" max="9" value="{{ cur.resolution if cur else 0 }}">
+        </label>
+        <label>Bit rate
+          <select name="bit_rate">
+            {% for value, label in s.bit_rates %}
+            <option value="{{ value }}"{% if cur and value == cur.bit_rate %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Frames/s
+          <input name="frame_rate" type="number" min="1" max="{{ stream.frame_rate_max }}" value="{{ cur.frame_rate if cur else 15 }}">
+        </label>
+        <label>GOP (key frame interval)
+          <input name="gop" type="number" min="1" max="200" value="{{ cur.gop if cur else 30 }}">
+        </label>
+      </div>
+      <label><input type="checkbox" name="vbr"{% if cur and cur.vbr %} checked{% endif %}> Variable bit rate</label>
+      <p class="small">Resolution codes are the camera's own: 0 = 1280x720 and 3 = 640x360 on a Foscam C1 V3; other codes are shown as numbers.</p>
+      <button type="submit" name="action" value="save" class="secondary">Save into the picked profile</button>
+    </details>
+  </form>
+  {% endfor %}
+  {% if not stream.streams and not stream.error %}<p class="small">No stream information from the camera.</p>{% endif %}
+</article>
