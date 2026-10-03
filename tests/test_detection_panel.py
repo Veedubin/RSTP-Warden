@@ -753,3 +753,55 @@ def test_toggle_during_stalled_download_answers_fast(
     finally:
         release.set()
         rt.stop_all()
+
+
+# --- review fixes (2026-10-03 code review) -----------------------------------------------
+
+
+def test_retention_save_rejects_bad_numbers_with_422(env: SimpleNamespace) -> None:
+    """Form text that is not a number, or a value RetentionConfig refuses, is a 422, not a 500."""
+    before = env.path.read_text(encoding="utf-8")
+    r = _post(env, "/cameras/yard/retention", {"max_days": "seven"}, htmx=False)
+    assert r.status_code == 422
+    r = _post(env, "/cameras/yard/retention", {"max_gb": "-1"}, htmx=False)
+    assert r.status_code == 422
+    assert env.cfg.cameras[0].retention is None
+    assert env.path.read_text(encoding="utf-8") == before
+
+
+def test_retention_save_patches_only_that_camera(env: SimpleNamespace) -> None:
+    """A retention block another camera got by hand after startup survives a save."""
+    raw = yaml.safe_load(env.path.read_text(encoding="utf-8"))
+    raw["cameras"][1]["retention"] = {"max_days": 3}
+    env.path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    r = _post(
+        env,
+        "/cameras/yard/retention",
+        {"max_days": "7", "max_gb": "", "keep_last_n": "", "cleanup_interval_seconds": ""},
+        htmx=False,
+    )
+    assert r.status_code == 303
+    raw = yaml.safe_load(env.path.read_text(encoding="utf-8"))
+    assert raw["cameras"][0]["retention"] == {
+        "max_days": 7,
+        "keep_last_n": 0,
+        "cleanup_interval_seconds": 300,
+    }
+    assert raw["cameras"][1]["retention"] == {"max_days": 3}
+
+
+def test_detection_settings_refuse_when_camera_left_the_file(env: SimpleNamespace) -> None:
+    """A camera renamed in config.yaml since startup: 409, nothing changed, no rebuild."""
+    raw = yaml.safe_load(env.path.read_text(encoding="utf-8"))
+    raw["cameras"][0]["name"] = "renamed"
+    env.path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    before = env.path.read_text(encoding="utf-8")
+    r = _post(
+        env,
+        "/cameras/yard/detection",
+        {"detect_fps": "4", "track_grace_seconds": "3", "min_track_frames": "2"},
+    )
+    assert r.status_code == 409
+    assert env.cfg.cameras[0].detect_fps == 5.0
+    assert env.path.read_text(encoding="utf-8") == before
+    env.runtime.rebuild_camera_detectors.assert_not_called()

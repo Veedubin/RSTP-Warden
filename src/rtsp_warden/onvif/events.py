@@ -67,7 +67,8 @@ _TOPIC_MAP: list[tuple[str, OnvifEventType]] = [
     ("intrusion", OnvifEventType.ANALYTIC),
 ]
 
-# Event type to severity mapping for AlertManager integration
+# Event type to severity, kept in the event dict for log consumers (nothing routes ONVIF
+# events to notifications: feeding them into rules is a spec non-goal).
 _EVENT_SEVERITY: dict[OnvifEventType, str] = {
     OnvifEventType.MOTION: "info",
     OnvifEventType.TAMPER: "warn",
@@ -126,7 +127,7 @@ class OnvifEvent:
         )
 
     def to_alert_event(self) -> dict[str, Any]:
-        """Convert to an event dict compatible with AlertManager.dispatch_event.
+        """Convert to a plain event dict (camera_name, event_type, severity, message).
 
         Returns:
             Dict with keys: camera_name, event_type, severity, message.

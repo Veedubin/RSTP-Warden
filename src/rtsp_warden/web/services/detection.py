@@ -40,7 +40,7 @@ from ...status_model import camera_detection_summary
 from ..config_lock import CONFIG_RMW_LOCK, _locked_write_yaml
 
 if TYPE_CHECKING:
-    from ...config import AppConfig, CameraConfig, DetectorSpec
+    from ...config import AppConfig, CameraConfig, DetectorSpec, RetentionConfig
 
 log = logging.getLogger(__name__)
 
@@ -243,8 +243,11 @@ def update_config_yaml(config_path: Path, mutate: Callable[[dict[str, Any]], boo
 
 def _persist_camera_field(
     config_path: Path, camera_name: str, field_name: str, value: object
-) -> None:
+) -> bool:
     """Persist one camera-level field for one camera to config.yaml.
+
+    Returns False, and writes nothing, when the camera is not in the file (it was renamed
+    or removed by hand since startup); routes answer 409 then instead of claiming "Saved".
 
     Args:
         config_path: Path to config.yaml.
@@ -260,29 +263,31 @@ def _persist_camera_field(
                 return True
         return False  # not in the file: nothing to write
 
-    update_config_yaml(config_path, mutate)
+    return update_config_yaml(config_path, mutate)
 
 
-def _persist_camera_retention(config_path: Path, cfg: AppConfig) -> None:
-    """Write every camera's in-memory ``retention`` block back to config.yaml."""
+def _persist_camera_retention(
+    config_path: Path, camera_name: str, retention: RetentionConfig | None
+) -> bool:
+    """Write one camera's ``retention`` block to config.yaml (None removes the override).
+
+    Only that camera's raw entry changes; other cameras keep whatever the file holds,
+    including blocks added by hand since startup. Returns False, and writes nothing,
+    when the camera is not in the file.
+    """
 
     def mutate(data: dict[str, Any]) -> bool:
-        changed = False
         for cam_dict in data.get("cameras") or []:
-            if not isinstance(cam_dict, dict) or cam_dict.get("name") is None:
+            if not isinstance(cam_dict, dict) or cam_dict.get("name") != camera_name:
                 continue
-            for cam_cfg in cfg.cameras:
-                if cam_cfg.name == cam_dict["name"]:
-                    if cam_cfg.retention is not None:
-                        cam_dict["retention"] = cam_cfg.retention.model_dump(exclude_none=True)
-                        changed = True
-                    elif "retention" in cam_dict:
-                        del cam_dict["retention"]
-                        changed = True
-                    break
-        return changed
+            if retention is not None:
+                cam_dict["retention"] = retention.model_dump(exclude_none=True)
+            else:
+                cam_dict.pop("retention", None)
+            return True
+        return False
 
-    update_config_yaml(config_path, mutate)
+    return update_config_yaml(config_path, mutate)
 
 
 def _persist_detector_entry(

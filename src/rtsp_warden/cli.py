@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,7 @@ from rich.table import Table
 from . import __version__
 from .app import AppRuntime
 from .config import AppConfig, load_config
-from .ffmpeg import which_or_raise
+from .ffmpeg import redact_text, which_or_raise
 from .frame_tap import FrameConsumer
 from .logging_utils import setup_logging
 from .ports import port_is_free as _port_is_free
@@ -332,16 +331,14 @@ def _latest_file_info(dir_path: Path) -> tuple[float, str]:
         return 0.0, ""
 
 
-# The "user:pass@" of a URL, up to the last "@" before the host (a password may hold "@").
 # ffmpeg prints the expanded camera URL when it cannot open its input, and /status.json
 # needs no login, so every stderr line is masked before it leaves this module.
-_STDERR_USERINFO_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@")
-_STDERR_LINE_MAX = 2000  # the regex backtracks; ffmpeg lines are far shorter
+_STDERR_LINE_MAX = 2000  # ffmpeg lines are far shorter; bounds the regex work
 
 
 def _redact_stderr_line(line: object) -> str:
-    """One stderr line with the userinfo of every URL in it replaced by ``***:***``."""
-    return _STDERR_USERINFO_RE.sub(r"\1***:***@", str(line)[:_STDERR_LINE_MAX])
+    """One stderr line with URL credentials and pwd=-style values masked (ffmpeg.redact_text)."""
+    return redact_text(str(line)[:_STDERR_LINE_MAX])
 
 
 def _proc_status(role: str, name: str, proc: Any) -> dict[str, Any]:

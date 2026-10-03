@@ -166,6 +166,9 @@ class AppRuntime:
     # Threads tearing down runners a rebuild swapped out (see _retire_runners).
     _retiring: list[threading.Thread] = field(default_factory=list, init=False, repr=False)
     _event_sink: EventSink | None = field(default=None, init=False, repr=False)
+    # Model input widths by model name: status polls ask for them every few seconds, so each
+    # descriptor is read once; build() and rebuild_camera_detectors() forget them.
+    _input_widths: dict[str, int | None] = field(default_factory=dict, init=False, repr=False)
     _detector_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     # Lifecycle requests posted from any thread and applied by run_forever on the main thread.
     # SimpleQueue's get/put are C calls a signal handler cannot interrupt halfway, so
@@ -175,6 +178,7 @@ class AppRuntime:
     )
 
     def build(self) -> None:
+        self._input_widths.clear()
         # Process-wide action plumbing; nothing starts until start().
         self.actions = build_actions(self.cfg)
         self.action_queue = ActionQueue(self.actions)
@@ -185,12 +189,18 @@ class AppRuntime:
         self._build_detectors()
 
     def _build_camera_runtime(
-        self, cam: CameraConfig, *, hub: FrameHub | None = None
+        self,
+        cam: CameraConfig,
+        *,
+        hub: FrameHub | None = None,
+        rule_engine: RuleEngine | None = None,
     ) -> CameraRuntime:
         """Build one camera's recorder, proxy, retention and backoffs. Starts nothing.
 
         ``hub`` is reused when the camera still serves MJPEG, so a restart keeps the
         FrameHub that open ``/live.mjpeg`` viewers hold. It is ignored otherwise.
+        ``rule_engine`` is reused by a restart whose rules did not change, so rule
+        cooldowns survive an edit or a detect_fps change.
         """
         proxy: object | None = None
 
@@ -254,7 +264,7 @@ class AppRuntime:
             rec_backoff=rec_backoff,
             proxy_backoff=proxy_backoff,
             dispatcher=dispatcher,
-            rule_engine=RuleEngine(cam.name, cam.rules),
+            rule_engine=rule_engine if rule_engine is not None else RuleEngine(cam.name, cam.rules),
         )
 
     def _wants_frames(self, cam: CameraConfig) -> bool:
@@ -496,7 +506,10 @@ class AppRuntime:
         # Rebuild, do not just stop()/start(): the ingestors copy the URLs and settings when
         # they are built, so an edited CameraConfig only takes effect in a new recorder.
         cam = next((c for c in self.cfg.cameras if c.name == name), old.camera)
-        new = self._build_camera_runtime(cam, hub=old.hub)
+        same_rules = old.rule_engine is not None and old.rule_engine.rules == list(cam.rules)
+        new = self._build_camera_runtime(
+            cam, hub=old.hub, rule_engine=old.rule_engine if same_rules else None
+        )
         self.cameras = [new if r is old else r for r in self.cameras]
         if self.detectors_enabled:
             try:
@@ -765,6 +778,7 @@ class AppRuntime:
         if cam_rt is None:
             raise ValueError(f"camera {camera_name!r} not found")
 
+        self._input_widths.clear()  # a config change may have added or edited a model
         runner_name = f"detector_{camera_name}"
         new_runner = self._make_runner(cam_rt.camera)
         if new_runner is not None:
@@ -978,11 +992,18 @@ class AppRuntime:
         """input_size[0] of an onnx spec's model; None for other types and unknown models."""
         if spec.type != "onnx":
             return None
+        model = spec.model or DEFAULT_ONNX_MODEL
+        if model in self._input_widths:
+            return self._input_widths[model]
+        width: int | None
         try:
-            desc = load_descriptor(spec.model or DEFAULT_ONNX_MODEL, self.cfg.runtime.models_dir)
+            desc = load_descriptor(model, self.cfg.runtime.models_dir)
         except Exception:
-            return None  # the registry skips a detector whose model it cannot resolve, too
-        return int(desc.input_size[0])
+            width = None  # the registry skips a detector whose model it cannot resolve, too
+        else:
+            width = int(desc.input_size[0])
+        self._input_widths[model] = width
+        return width
 
     @staticmethod
     def _tap_ingestor(rt: CameraRuntime) -> StreamIngestor | None:

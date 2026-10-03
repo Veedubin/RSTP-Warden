@@ -1121,3 +1121,22 @@ def test_consumer_rebinds_hold_the_detector_lock(
         assert dispatcher.consumers == ()
     finally:
         runtime.stop_all()
+
+
+def test_restart_keeps_the_rule_engine_and_its_cooldowns(
+    tmp_path: Path, calls: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit or detect_fps change rebuilds the camera but must not forget rule cooldowns."""
+    runtime = _runtime([_cam("a", tmp_path, proxy="mjpeg")])
+    runtime.build()
+    _start(runtime, monkeypatch)
+    old = runtime.find_camera("a")
+    assert old is not None and old.rule_engine is not None
+    engine = old.rule_engine
+    fut = runtime.request_restart_camera("a")
+    runtime._drain_requests()
+    assert fut.result(timeout=0) is None
+    new = runtime.find_camera("a")
+    assert new is not None and new is not old
+    assert new.rule_engine is engine
+    runtime.stop_all()

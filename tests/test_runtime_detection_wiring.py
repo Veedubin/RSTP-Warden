@@ -737,3 +737,29 @@ def test_doctor_checks_each_onnx_detector_device(
     assert len(rows) == 1  # one row per enabled onnx detector, labelled with its index
     assert "onnx cam[1]" in rows[0]
     assert expected in rows[0]
+
+
+def test_model_input_width_reads_each_descriptor_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Status polls call tap_settings_for constantly; descriptors are read once per rebuild."""
+    from types import SimpleNamespace
+
+    from rtsp_warden.config import DetectorSpec
+
+    rt = make_runtime(tmp_path, [camera("front", tmp_path)])
+    rt.build()
+    reads: list[str] = []
+
+    def fake_load(name: str, models_dir: Path) -> SimpleNamespace:
+        reads.append(name)
+        return SimpleNamespace(input_size=(640, 640))
+
+    monkeypatch.setattr(app_mod, "load_descriptor", fake_load)
+    spec = DetectorSpec(type="onnx", model="yolox-s")
+    assert rt._model_input_width(spec) == 640
+    assert rt._model_input_width(spec) == 640
+    assert reads == ["yolox-s"]
+    rt.rebuild_camera_detectors("front")  # a rebuild may follow a config change: forget
+    assert rt._model_input_width(spec) == 640
+    assert reads == ["yolox-s", "yolox-s"]

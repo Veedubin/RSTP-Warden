@@ -502,3 +502,27 @@ def test_concurrent_callers_download_once(tmp_path: Path) -> None:
 
     assert calls == ["https://example.invalid/tiny.onnx"]
     assert results == [model_file_path(desc, tmp_path)] * 2
+
+
+def test_verified_file_is_not_rehashed_until_it_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ensure_model_file hashes a present model once; a changed file is verified again."""
+    payload = b"already here"
+    desc = tiny_desc(tmp_path, payload)
+    final = model_file_path(desc, tmp_path)
+    final.parent.mkdir(parents=True)
+    final.write_bytes(payload)
+    hashed: list[Path] = []
+    real = mr._sha256_file
+    monkeypatch.setattr(mr, "_sha256_file", lambda p: (hashed.append(p), real(p))[1])
+    opener = FakeOpener(error=AssertionError("must not download"))
+
+    assert mr.ensure_model_file(desc, tmp_path, opener=opener) == final
+    assert mr.ensure_model_file(desc, tmp_path, opener=opener) == final
+    assert len(hashed) == 1
+
+    final.write_bytes(b"tampered, longer bytes")
+    with pytest.raises(mr.ModelVerifyError):
+        mr.ensure_model_file(desc, tmp_path, opener=opener)
+    assert len(hashed) == 2

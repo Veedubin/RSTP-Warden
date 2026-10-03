@@ -34,7 +34,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from ... import probe
-from ...app import CameraNotFoundError
+from ...app import CameraNotFoundError, _error_text
 from ...config import AppConfig, CameraConfig
 from ...ffmpeg import redact_text
 from ...onvif import media as onvif_media
@@ -297,11 +297,6 @@ class _FieldError(ValueError):
     def __init__(self, field: str, message: str) -> None:
         super().__init__(message)
         self.field = field
-
-
-def _error_text(exc: BaseException) -> str:
-    """One line for a flash message: type and message, credentials masked, 300 chars."""
-    return redact_text(f"{type(exc).__name__}: {exc}"[:1000])[:300]
 
 
 def _unreadable_config(config_path: Path) -> str:

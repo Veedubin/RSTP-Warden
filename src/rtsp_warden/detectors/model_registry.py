@@ -319,13 +319,14 @@ def ensure_model_file(
     path = model_file_path(desc, models_dir)
     with _lock_for(path):
         if path.is_file():
-            if desc.sha256 is not None:
+            if desc.sha256 is not None and not _already_verified(path, desc.sha256):
                 actual = _sha256_file(path)
                 if actual != desc.sha256:
                     raise ModelVerifyError(
                         f"model file {path} has SHA-256 {actual}, expected {desc.sha256}; "
                         "delete it to download it again"
                     )
+                _remember_verified(path, desc.sha256)
             return path
         if desc.url is None:
             raise ModelNotFound(
@@ -365,8 +366,41 @@ def ensure_model_file(
                 desc.name,
             )
         os.replace(part, path)
+        if desc.sha256 is not None:
+            _remember_verified(path, desc.sha256)
         log.info("model %s ready: %s", desc.name, path)
         return path
+
+
+# Files whose SHA-256 matched, by path: (size, mtime_ns, sha256). Every detector hot reload
+# calls ensure_model_file again; hashing 35 MB each time is wasted work while the file is
+# unchanged. A different size or mtime means it is verified again.
+_VERIFIED: dict[str, tuple[int, int, str]] = {}
+_VERIFIED_LOCK = threading.Lock()
+
+
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (int(st.st_size), int(st.st_mtime_ns))
+
+
+def _already_verified(path: Path, sha256: str) -> bool:
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return False
+    with _VERIFIED_LOCK:
+        return _VERIFIED.get(str(path)) == (*stamp, sha256)
+
+
+def _remember_verified(path: Path, sha256: str) -> None:
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return
+    with _VERIFIED_LOCK:
+        _VERIFIED[str(path)] = (*stamp, sha256)
 
 
 def camera_model_labels(cam: CameraConfig, models_dir: Path) -> dict[str, list[str]]:

@@ -30,8 +30,9 @@ status surfaces; Dockerfile.cuda + GPU compose overlay + docs. Rulings R1-R22 in
 individually.
 
 **Known open / deferred.**
-- No whole-branch code review was run (owner stopped review agents for cost). Reviewer findings that landed before the
-  stop were folded in by the implementers; see the commit bodies on the two branches.
+- Whole-branch code review (2026-10-03, `/code-review high`, e5623cb..master): 8 findings, none Critical, all fixed in
+  `fix: address code-review findings` (retention form 422s, 409 when a camera left config.yaml, rule cooldowns survive
+  restarts, one redaction helper, model hash cached, descriptor reads cached, per-camera retention patch).
 - Manual Foscam tests (plan tasks RW-2/12, RW-3/19) not run: need the owner's OK and the camera.
 - Dockerfile.cuda / GPU path not built or run on this host (no NVIDIA container toolkit). CPU path verified offline only.
 - YOLOX model SHA-256 values come from mirrors; the first real download verifies them (fails loudly on mismatch).

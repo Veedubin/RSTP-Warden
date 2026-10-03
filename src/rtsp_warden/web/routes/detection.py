@@ -29,6 +29,7 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from ...config import DETECT_FPS_MAX, DETECT_FPS_MIN, AppConfig, CameraConfig, RetentionConfig
@@ -90,6 +91,14 @@ def _form_float(form: Any, key: str) -> float:
     if not math.isfinite(value):
         raise HTTPException(status_code=422, detail=f"{key} must be a number")
     return value
+
+
+def _left_the_file(config_path: Path, name: str) -> str:
+    """409 text: the camera is in memory but no longer in config.yaml (edited by hand)."""
+    return (
+        f"{config_path.name} no longer has a camera named {name!r}; nothing was saved. "
+        "Restart rtsp-warden to load the edited file."
+    )
 
 
 def _form_int(form: Any, key: str) -> int:
@@ -263,15 +272,22 @@ async def save_detection_settings(
         config_path = get_config_path(request)
         if config_path is not None:
 
-            def persist(path: Path = config_path) -> None:
-                for key, value in changes.items():
-                    _persist_camera_field(path, name, key, value)
+            def persist(path: Path = config_path) -> bool:
+                return all(
+                    [
+                        _persist_camera_field(path, name, key, value)
+                        for key, value in changes.items()
+                    ]
+                )
 
             try:
-                await run_in_threadpool(persist)
+                written = await run_in_threadpool(persist)
             except OSError as exc:
                 log.warning("camera %s: detection settings not saved: %s", name, exc)
                 error = write_failed_message(config_path, exc)
+            else:
+                if not written:
+                    raise HTTPException(status_code=409, detail=_left_the_file(config_path, name))
         for key, value in changes.items():
             setattr(cam, key, value)
         # One rebuild covers every field: it rebuilds the tracker and, when the tap the
@@ -480,44 +496,54 @@ async def save_camera_retention(
 
     # Handle "reset to global" action
     action = form.get("action")
-    if action == "reset":
-        cam_config.retention = None
-    else:
-        # Parse retention fields from form
-        max_days_raw = form.get("max_days")
-        max_gb_raw = form.get("max_gb")
-        keep_last_n_raw = form.get("keep_last_n")
-        cleanup_interval_raw = form.get("cleanup_interval_seconds")
-
-        max_days: int | None = (
-            int(max_days_raw) if max_days_raw and str(max_days_raw).strip() else None
-        )
-        max_gb: float | None = float(max_gb_raw) if max_gb_raw and str(max_gb_raw).strip() else None
-        keep_last_n: int = (
-            int(keep_last_n_raw) if keep_last_n_raw and str(keep_last_n_raw).strip() else 0
-        )
-        cleanup_interval_seconds: int = (
-            int(cleanup_interval_raw)
-            if cleanup_interval_raw and str(cleanup_interval_raw).strip()
-            else 300
-        )
-
-        cam_config.retention = RetentionConfig(
-            max_days=max_days,
-            max_gb=max_gb,
-            keep_last_n=keep_last_n,
-            cleanup_interval_seconds=cleanup_interval_seconds,
-        )
+    retention: RetentionConfig | None = None
+    if action != "reset":
+        # Form text -> numbers; a value that is not a number or that RetentionConfig
+        # refuses is the user's mistake (422), never a 500.
+        try:
+            max_days = _optional_number(form, "max_days", int)
+            max_gb = _optional_number(form, "max_gb", float)
+            keep_last_n = _optional_number(form, "keep_last_n", int)
+            cleanup_interval_seconds = _optional_number(form, "cleanup_interval_seconds", int)
+            retention = RetentionConfig(
+                max_days=max_days,
+                max_gb=max_gb,
+                keep_last_n=0 if keep_last_n is None else keep_last_n,
+                cleanup_interval_seconds=(
+                    300 if cleanup_interval_seconds is None else cleanup_interval_seconds
+                ),
+            )
+        except ValidationError as exc:
+            detail = "; ".join(str(err["msg"]) for err in exc.errors())
+            raise HTTPException(status_code=422, detail=detail) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
 
     if config_path is not None:
         try:
-            await run_in_threadpool(_persist_camera_retention, config_path, cfg)
+            written = await run_in_threadpool(
+                _persist_camera_retention, config_path, name, retention
+            )
         except OSError as exc:
             raise HTTPException(
                 status_code=503, detail=write_failed_message(config_path, exc)
             ) from exc
+        if not written:
+            raise HTTPException(status_code=409, detail=_left_the_file(config_path, name))
+    cam_config.retention = retention
 
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)
+
+
+def _optional_number(form: Any, key: str, kind: type) -> Any:
+    """``kind(form[key])`` or None for a blank field; ValueError names the field."""
+    raw = str(form.get(key, "") or "").strip()
+    if not raw:
+        return None
+    try:
+        return kind(raw)
+    except ValueError:
+        raise ValueError(f"{key} must be a number") from None
 
 
 @router.post("/{name}/reload")
