@@ -42,6 +42,7 @@ from ..services.detection import (
     _persist_camera_field,
     _persist_camera_retention,
     _persist_detector_entry,
+    camera_badge,
     class_groups_for,
     detector_rows,
     fire_test_event,
@@ -153,6 +154,7 @@ def _panel_response(
         {
             "cam": cam,
             "status": runtime_detection_status(_display_runtime(request), cam.name),
+            "detection_badge": camera_badge(_display_runtime(request), cam.name),
             "detect_fps_min": DETECT_FPS_MIN,
             "detect_fps_max": DETECT_FPS_MAX,
             "zone_count": len(cam.zones),

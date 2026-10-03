@@ -27,6 +27,7 @@ import yaml
 from ...actions.base import placeholder_jpeg
 from ...actions.rules import RuleDecision, RuleEngine
 from ...db import schema
+from ...detectors.builtin.onnx import CUDA_PROVIDER
 from ...detectors.event_builder import EventBuilder, EventInfo
 from ...detectors.model_registry import (
     DEFAULT_MODEL,
@@ -36,6 +37,7 @@ from ...detectors.model_registry import (
     load_labels,
 )
 from ...detectors.registry import LEGACY_DETECTOR_TYPES
+from ...status_model import camera_detection_summary
 from ..config_lock import _locked_write_yaml
 
 if TYPE_CHECKING:
@@ -417,3 +419,39 @@ def fire_test_event(
     if any(match.actions for match in local.matched):
         note = "Actions were not sent: the detection runtime is not available."
     return FiredTestEvent(event_id, rel, local, note=note)
+
+
+# --- status badge (Task 17) --------------------------------------------------------------
+
+
+def camera_badge(runtime: Any, name: str) -> dict[str, Any] | None:
+    """Detection badge for camera *name*, or None when it runs no detection.
+
+    ``text``: ``detection error`` (a detector could not load its model), ``CPU fallback``
+    (``device: cuda`` but the session runs on CPU), ``GPU``, ``model loading`` (an ``onnx``
+    detector has no session yet) or ``CPU``. ``level`` is ``error`` | ``warn`` | ``ok`` (the
+    CSS modifier), ``title`` the warnings (else the provider) for the tooltip, ``dropped`` and
+    ``processed`` the runner's frame counters since it last started (a hot reload resets them).
+    """
+    det = camera_detection_summary(runtime, name)
+    if det is None:
+        return None
+    rows = det["detectors"]
+    providers = {d["provider"] for d in rows if d["provider"]}
+    if any(d["error"] for d in rows):
+        text, level = "detection error", "error"
+    elif det["fallback_warning"]:
+        text, level = "CPU fallback", "warn"
+    elif CUDA_PROVIDER in providers:
+        text, level = "GPU", "ok"
+    elif not providers and any(d["type"] == "onnx" for d in rows):
+        text, level = "model loading", "ok"
+    else:
+        text, level = "CPU", "ok"
+    return {
+        "text": text,
+        "level": level,
+        "title": "; ".join(det["warnings"]) or det["provider"] or "OpenCV on CPU",
+        "dropped": det["dropped"],
+        "processed": det["processed"],
+    }

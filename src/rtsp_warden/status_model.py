@@ -14,11 +14,15 @@ Bot 6 will later wire a real runtime `get_status()` producer.
 For now, Bot 3 provides a stable schema + helpers.
 """
 
+import logging
+import math
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, TypedDict
 from urllib.parse import urlsplit, urlunsplit
+
+log = logging.getLogger(__name__)
 
 # ---------------------------
 # TypedDict schema (JSON-ish)
@@ -72,6 +76,34 @@ class StreamStatus(TypedDict, total=False):
     rtsp_publish_url: str
 
 
+class DetectorStatus(TypedDict):
+    """One configured detector in a camera's ``detection`` block (see summarize_detection)."""
+
+    index: int  # position in the camera's ``detectors`` list in config.yaml
+    type: str  # "motion" | "onnx" | legacy types
+    model: str | None  # onnx model name, e.g. "yolox-s"
+    device: str | None  # requested device: "auto" | "cuda" | "cpu"
+    provider: str | None  # ONNX Runtime provider really in use; None until the model loads
+    fps: float | None  # rate this detector runs at
+    processed: int
+    skipped: int
+    errors: int
+    fallback_warning: str | None  # "CUDA requested but unavailable; running on ..."
+    error: str | None  # model load failure (runner "error") or a setup() exception ("setup_error")
+
+
+class DetectionStatus(TypedDict):
+    """Per-camera detection block in /status.json, /health and ``rtsp-warden status``."""
+
+    provider: str | None  # distinct providers in use, comma-joined; None when none is known
+    fallback_warning: str | None  # first detector fallback warning
+    processed: int  # frames run through the detectors since the runner started
+    dropped: int  # frames dropped by the runner's bounded queue since it started
+    errors: int
+    warnings: list[str]  # "detector <index> (<type>): <text>" for every error and fallback
+    detectors: list[DetectorStatus]
+
+
 class CameraStatus(TypedDict, total=False):
     """Per-camera status."""
 
@@ -81,6 +113,9 @@ class CameraStatus(TypedDict, total=False):
 
     # By convention, keys are stream names: "main", "sub".
     streams: dict[str, StreamStatus]
+
+    # None when the camera runs no detector (or no live runtime is attached).
+    detection: DetectionStatus | None
 
 
 class AppStatus(TypedDict, total=False):
@@ -274,3 +309,106 @@ def _drop_none(d: dict[str, Any]) -> dict[str, Any]:
             continue
         out[k] = v
     return out
+
+
+# -----------------------------
+# Detection status (RW-3)
+# -----------------------------
+
+_MAX_STATUS_TEXT = 300
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    """Plain ``int`` (numpy scalars break JSONResponse); *default* when not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _as_float(value: Any) -> float | None:
+    """Plain finite ``float`` or None (NaN/inf are not valid JSON)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _as_text(value: Any) -> str | None:
+    """Stripped ``str`` cut to 300 characters, or None when empty."""
+    if value is None:
+        return None
+    text = str(value).strip()[:_MAX_STATUS_TEXT]
+    return text or None
+
+
+def summarize_detection(raw: Any) -> DetectionStatus | None:
+    """Turn ``AppRuntime.detection_status(name)`` into the JSON-safe ``detection`` block.
+
+    None when the camera runs no detector: *raw* is not a mapping (unknown camera, a fake
+    runtime), says ``"enabled": False`` (no runner) or has no ``detectors`` list. Numbers
+    become plain ``int``/``float``, strings are cut to 300 characters and unknown keys are
+    dropped, so the result is safe for ``JSONResponse`` and ``json.dumps``.
+    """
+    if not isinstance(raw, Mapping) or raw.get("enabled") is False:
+        return None
+    entries = raw.get("detectors")
+    if not isinstance(entries, (list, tuple)):
+        return None
+    detectors: list[DetectorStatus] = []
+    for position, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            continue
+        detectors.append(
+            {
+                "index": _as_int(entry.get("index"), position),
+                "type": _as_text(entry.get("type")) or "",
+                "model": _as_text(entry.get("model")),
+                "device": _as_text(entry.get("device")),
+                "provider": _as_text(entry.get("provider")),
+                "fps": _as_float(entry.get("fps")),
+                "processed": _as_int(entry.get("processed")),
+                "skipped": _as_int(entry.get("skipped")),
+                "errors": _as_int(entry.get("errors")),
+                "fallback_warning": _as_text(entry.get("fallback_warning")),
+                "error": _as_text(entry.get("error")) or _as_text(entry.get("setup_error")),
+            }
+        )
+    warnings = [
+        f"detector {d['index']} ({d['type']}): {text}"
+        for d in detectors
+        for text in (d["error"], d["fallback_warning"])
+        if text
+    ]
+    providers = sorted({d["provider"] for d in detectors if d["provider"]})
+    fallback = next((d["fallback_warning"] for d in detectors if d["fallback_warning"]), None)
+    return {
+        "provider": ", ".join(providers) or None,
+        "fallback_warning": fallback,
+        "processed": _as_int(raw.get("frames_processed")),
+        "dropped": _as_int(raw.get("frames_dropped")),
+        "errors": _as_int(raw.get("errors_total")),
+        "warnings": warnings,
+        "detectors": detectors,
+    }
+
+
+def camera_detection_summary(rt: Any, name: str) -> DetectionStatus | None:
+    """The ``detection`` block for camera *name*, or None when *rt* runs no detection for it.
+
+    Calls ``rt.detection_status(name)`` when *rt* has it. A runtime without the method (None,
+    a test fake) and a call that raises both give None: a status page never fails because of
+    detection.
+    """
+    getter = getattr(rt, "detection_status", None)
+    if not callable(getter):
+        return None
+    try:
+        raw = getter(name)
+    except Exception:
+        log.debug("detection_status(%r) failed", name, exc_info=True)
+        return None
+    return summarize_detection(raw)

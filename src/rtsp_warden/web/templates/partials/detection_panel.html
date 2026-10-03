@@ -1,7 +1,10 @@
 {# Detection panel body (RW-3 Task 15): GET /cameras/{name}/detection and the htmx answer
    of POST /cameras/{name}/detection. Swapped into #detection-panel. #}
 <article class="detection-panel">
-  <header>Detection</header>
+  <header>
+    Detection
+    {% with camera = {"detection": detection_badge} %}{% include "partials/_detection_badge.html" %}{% endwith %}
+  </header>
   {% if message %}<p class="detection-message" role="status">{{ message }}</p>{% endif %}
   {% if error %}<p class="detection-error" role="alert">{{ error }}</p>{% endif %}
 

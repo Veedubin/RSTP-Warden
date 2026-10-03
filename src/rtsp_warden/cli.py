@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import socket
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ from .config import AppConfig, load_config
 from .ffmpeg import which_or_raise
 from .frame_tap import FrameConsumer
 from .logging_utils import setup_logging
-from .status_model import redact_rtsp_url
+from .status_model import camera_detection_summary, redact_rtsp_url
 from .web.config import WebSettings
 from .web.server import WebUIServer
 
@@ -255,6 +256,18 @@ def _latest_file_info(dir_path: Path) -> tuple[float, str]:
         return 0.0, ""
 
 
+# The "user:pass@" of a URL, up to the last "@" before the host (a password may hold "@").
+# ffmpeg prints the expanded camera URL when it cannot open its input, and /status.json
+# needs no login, so every stderr line is masked before it leaves this module.
+_STDERR_USERINFO_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@")
+_STDERR_LINE_MAX = 2000  # the regex backtracks; ffmpeg lines are far shorter
+
+
+def _redact_stderr_line(line: object) -> str:
+    """One stderr line with the userinfo of every URL in it replaced by ``***:***``."""
+    return _STDERR_USERINFO_RE.sub(r"\1***:***@", str(line)[:_STDERR_LINE_MAX])
+
+
 def _proc_status(role: str, name: str, proc: Any) -> dict[str, Any]:
     if proc is None:
         return {"role": role, "name": name, "running": False}
@@ -278,7 +291,7 @@ def _proc_status(role: str, name: str, proc: Any) -> dict[str, Any]:
     try:
         tail = proc.stderr_tail()
         if tail:
-            out["stderr_tail"] = tail
+            out["stderr_tail"] = [_redact_stderr_line(ln) for ln in tail]
     except Exception:
         pass
 
@@ -376,11 +389,18 @@ def build_status(rt: AppRuntime, cfg: AppConfig, version: str = __version__) -> 
                 streams.setdefault(cam.proxy.stream, {})
                 streams[cam.proxy.stream]["mjpeg_http_up"] = bool(running)
 
+        # Detection (best-effort): never changes "ok"; warnings also go to the top-level
+        # "errors" list, which the health page already renders.
+        detection = camera_detection_summary(rt, cam.name)
+        if detection is not None:
+            errors.extend(f"{cam.name}: {text}" for text in detection["warnings"])
+
         cameras.append(
             {
                 "name": cam.name,
                 "ok": bool(cam_ok),
                 "streams": streams,
+                "detection": detection,
             }
         )
 

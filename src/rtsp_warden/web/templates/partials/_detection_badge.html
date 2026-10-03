@@ -1,0 +1,9 @@
+{#- Detection badge for one camera. Expects `camera`, a web.services.cameras.list_cameras()
+    dict; `camera.detection` comes from web.services.detection.camera_badge() and is None
+    when the camera runs no detection, so the include renders nothing. -#}
+{%- if camera.detection %}
+<span class="detection-badge detection-badge-{{ camera.detection.level }}" title="{{ camera.detection.title }}">{{ camera.detection.text }}</span>
+{%- if camera.detection.dropped %}
+<small class="detection-dropped" title="Frames dropped because detection could not keep up, since the detector last started">{{ camera.detection.dropped }} dropped</small>
+{%- endif %}
+{%- endif %}

@@ -1105,8 +1105,10 @@ class AppRuntime:
                     if tail:
                         last_err = tail[-1]
 
+            # ffmpeg prints the expanded camera URL when it cannot open it: mask the userinfo.
+            shown_err = _USERINFO_RE.sub(r"\1***:***@", last_err[:1000])[:120]
             table.add_row(
-                rt.camera.name, main_status, sub_status, proxy_status, frame_age, last_err[:120]
+                rt.camera.name, main_status, sub_status, proxy_status, frame_age, shown_err
             )
 
         self.console.clear()

@@ -81,6 +81,8 @@ def list_cameras(cfg: AppConfig, rt: Any = None) -> list[dict[str, Any]]:
     When *rt* (the live AppRuntime) is given, status fields come from
     ``live_status``; otherwise status is "unknown".
     """
+    from .detection import camera_badge  # local import: detection.py may import this module
+
     cameras: list[dict[str, Any]] = []
     for cam in cfg.cameras:
         row: dict[str, Any] = {
@@ -102,6 +104,7 @@ def list_cameras(cfg: AppConfig, rt: Any = None) -> list[dict[str, Any]]:
         cam_rt = _find_runtime(rt, cam.name) if rt is not None else None
         if cam_rt is not None:
             row.update(live_status(cam_rt))
+        row["detection"] = camera_badge(rt, cam.name) if cam_rt is not None else None
         cameras.append(row)
     return cameras
 
