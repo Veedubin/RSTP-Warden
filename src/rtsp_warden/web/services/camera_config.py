@@ -251,6 +251,15 @@ def _entry_name(entry: object) -> str:
     return str(entry.get("name", "")).strip() if isinstance(entry, dict) else ""
 
 
+def raw_camera_names(config_path: Path) -> list[str]:
+    """Names of the cameras in config.yaml as it is on disk (it may differ from cfg).
+
+    Raises yaml.YAMLError for a file that is not valid YAML, ValueError for one that is
+    not a config mapping, and OSError when it cannot be read.
+    """
+    return [name for name in (_entry_name(e) for e in _read_raw(config_path)["cameras"]) if name]
+
+
 def _find_entry(data: dict[str, Any], name: str) -> dict[str, Any]:
     for entry in data["cameras"]:
         if _entry_name(entry) == name:

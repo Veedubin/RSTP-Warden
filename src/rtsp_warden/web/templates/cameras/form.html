@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+{% include "partials/page_header.html" %}
+
+<form method="post" action="{{ form_action }}" id="camera-form">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+  {% if errors.form %}
+  <p class="flash flash-error" role="alert">{{ errors.form }}</p>
+  {% endif %}
+
+  <fieldset>
+    <legend>Camera</legend>
+
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" required maxlength="32" autocomplete="off"
+             value="{{ values.name }}"
+             {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% else %}aria-describedby="name-help"{% endif %}>
+      {% if errors.name %}
+      <small id="name-error">{{ errors.name }}</small>
+      {% else %}
+      <small id="name-help">Letters, digits, <code>-</code> and <code>_</code>, up to 32 characters. It names the recordings folder, so it cannot be changed later.</small>
+      {% endif %}
+    </div>
+
+    <div class="field">
+      <label for="host">Host</label>
+      <input id="host" name="host" type="text" required autocomplete="off" placeholder="192.168.1.20"
+             value="{{ values.host }}"
+             {% if errors.host %}aria-invalid="true" aria-describedby="host-error"{% endif %}>
+      {% if errors.host %}<small id="host-error">{{ errors.host }}</small>{% endif %}
+    </div>
+
+    <div class="grid">
+      <div class="field">
+        <label for="username">User name</label>
+        <input id="username" name="username" type="text" autocomplete="off" value="{{ values.username }}">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" value="">
+        {% if values.password_entered %}<small>Enter the password again.</small>{% endif %}
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Streams</legend>
+    <p><small>Use <strong>Find stream URLs</strong> to ask the camera over ONVIF, or type the path from the camera's manual (for example <code>/videoMain</code>). A full <code>rtsp://</code> URL also works; leave the user name and password out of it.</small></p>
+
+    <div class="field">
+      <label for="onvif_port">ONVIF port</label>
+      <input id="onvif_port" name="onvif_port" type="text" inputmode="numeric" autocomplete="off" placeholder="auto" value="{{ values.onvif_port }}"
+             {% if errors.onvif_port %}aria-invalid="true" aria-describedby="onvif_port-error"{% endif %}>
+      {% if errors.onvif_port %}<small id="onvif_port-error">{{ errors.onvif_port }}</small>
+      {% else %}<small>Leave empty to try ports 80, 8080, 888 and 2020.</small>{% endif %}
+    </div>
+    <button type="button" class="secondary"
+            hx-post="/cameras/new/onvif"
+            hx-target="#onvif-result" hx-swap="innerHTML" hx-disabled-elt="this">Find stream URLs (ONVIF)</button>
+    <div id="onvif-result" aria-live="polite"></div>
+
+    <div class="field">
+      <label for="main_url">Main stream</label>
+      <input id="main_url" name="main_url" type="text" autocomplete="off" placeholder="/videoMain or rtsp://192.168.1.20:554/videoMain" value="{{ values.main_url }}"
+             {% if errors.main_url %}aria-invalid="true" aria-describedby="main_url-error"{% endif %}>
+      {% if errors.main_url %}<small id="main_url-error">{{ errors.main_url }}</small>
+      {% else %}<small>Empty means <code>rtsp://HOST:554/</code>.</small>{% endif %}
+    </div>
+
+    <div class="field">
+      <label for="sub_url">Sub stream (optional)</label>
+      <input id="sub_url" name="sub_url" type="text" autocomplete="off" placeholder="leave empty if the camera has none" value="{{ values.sub_url }}"
+             {% if errors.sub_url %}aria-invalid="true" aria-describedby="sub_url-error"{% endif %}>
+      {% if errors.sub_url %}<small id="sub_url-error">{{ errors.sub_url }}</small>
+      {% else %}<small>Used for the live preview and detection when set. Leave it empty if the camera's second stream sends no video.</small>{% endif %}
+    </div>
+
+    <div role="group">
+      <button type="button" class="secondary"
+              hx-post="/cameras/new/test" hx-vals='{"stream": "main"}'
+              hx-target="#probe-result" hx-swap="innerHTML" hx-disabled-elt="this">Test main stream</button>
+      <button type="button" class="secondary"
+              hx-post="/cameras/new/test" hx-vals='{"stream": "sub"}'
+              hx-target="#probe-result" hx-swap="innerHTML" hx-disabled-elt="this">Test sub stream</button>
+    </div>
+    <small>A test can take up to 30 seconds.</small>
+    <div id="probe-result" aria-live="polite"></div>
+  </fieldset>
+
+  <fieldset>
+    <label for="record_enabled">
+      <input id="record_enabled" name="record_enabled" type="checkbox" role="switch" {% if values.record_enabled %}checked{% endif %}>
+      Record continuously
+    </label>
+  </fieldset>
+
+  <div role="group">
+    <button type="submit">Save camera</button>
+    <a href="/cameras" role="button" class="secondary outline">Cancel</a>
+  </div>
+</form>
+{% endblock %}

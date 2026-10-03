@@ -23,6 +23,7 @@ from .paths import STATIC_DIR
 from .routes.alerts import router as alerts_router
 from .routes.api import router as api_router
 from .routes.auth import router as auth_router
+from .routes.camera_edit import router as camera_edit_router
 from .routes.cameras import router as cameras_router
 from .routes.clips import router as clips_router
 from .routes.dashboard import router as dashboard_router
@@ -108,6 +109,8 @@ def create_app(
     # --- Route registration ---
     app.include_router(auth_router)
     app.include_router(dashboard_router)
+    # camera_edit first: its GET /cameras/new must win over GET /cameras/{name}.
+    app.include_router(camera_edit_router)
     app.include_router(cameras_router)
     app.include_router(recordings_router)
     app.include_router(events_router)

@@ -1,0 +1,19 @@
+{% if uris %}
+<p class="onvif-result" role="status">
+  Found ONVIF on port {{ uris.port }}.
+  {% if uris.main %}Main stream filled in.{% else %}The camera reported no stream URL; type the main stream path.{% endif %}
+  {% if uris.sub %}Sub stream filled in.{% else %}The camera reported only one stream; the sub stream stays empty.{% endif %}
+</p>
+<input id="onvif_port" name="onvif_port" type="text" inputmode="numeric" autocomplete="off" placeholder="auto" value="{{ uris.port }}" hx-swap-oob="true">
+{% if uris.main %}
+<input id="main_url" name="main_url" type="text" autocomplete="off" placeholder="/videoMain or rtsp://192.168.1.20:554/videoMain" value="{{ uris.main }}" hx-swap-oob="true">
+{% endif %}
+{% if uris.sub %}
+<input id="sub_url" name="sub_url" type="text" autocomplete="off" placeholder="leave empty if the camera has none" value="{{ uris.sub }}" hx-swap-oob="true">
+{% endif %}
+{% else %}
+<p class="onvif-result" role="alert">
+  ONVIF lookup failed{% if ports_tried %} (ports tried: {{ ports_tried }}){% endif %}: {{ error }}
+  <br>You can still type the stream path by hand.
+</p>
+{% endif %}

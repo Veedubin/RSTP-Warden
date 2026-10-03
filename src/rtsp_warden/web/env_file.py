@@ -86,3 +86,21 @@ def upsert_env_vars(path: Path, values: Mapping[str, str]) -> None:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
     log.info("Updated %s: %s", path, ", ".join(sorted(values)))
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    """Return the variables a .env file defines, parsed the way ``serve`` reads them.
+
+    The first definition of a key wins, as in ``cli._load_dotenv_file``. A missing file
+    reads as empty.
+    """
+    from ..cli import _parse_dotenv_value  # imported late: cli imports the web layer
+
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key = _line_key(line)
+        if key and key not in values:
+            values[key] = _parse_dotenv_value(line.strip().partition("=")[2])
+    return values

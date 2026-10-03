@@ -4,6 +4,8 @@
 {% block content %}
 {% set title = "Cameras" %}
 {% set subtitle = "Status refreshes every 5 seconds." %}
+{% set is_admin = request.state.current_user and request.state.current_user.role == 'admin' %}
+{% if is_admin %}{% set header_actions %}<a href="/cameras/new" role="button">Add camera</a>{% endset %}{% endif %}
 {% include "partials/page_header.html" %}
 
 {% if cameras %}
@@ -14,7 +16,7 @@
 </div>
 {% else %}
 <article>
-  <p>No cameras configured. Add cameras to your <code>config.yaml</code> and restart.</p>
+  <p>No cameras configured yet.{% if is_admin %} Use <a href="/cameras/new">Add camera</a>, or add them to <code>config.yaml</code> and restart.{% endif %}</p>
 </article>
 {% endif %}
 {% endblock %}

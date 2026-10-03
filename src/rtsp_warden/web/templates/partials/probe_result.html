@@ -1,0 +1,19 @@
+{% if result.ok %}
+<article class="probe-result probe-ok">
+  <p><strong>Connected</strong> to the {{ stream }} stream{% if tested_url %} (<code>{{ tested_url }}</code>){% endif %}.</p>
+  <ul>
+    <li>Codec: {{ result.codec or "unknown" }}</li>
+    <li>Resolution: {% if result.width and result.height %}{{ result.width }}x{{ result.height }}{% else %}unknown{% endif %}</li>
+    <li>Frame rate: {% if result.fps %}{{ "%.4g"|format(result.fps) }} fps{% else %}unknown{% endif %}</li>
+  </ul>
+  {% if snapshot_data_uri %}
+  <img src="{{ snapshot_data_uri }}" alt="Snapshot from the {{ stream }} stream">
+  {% endif %}
+  {% if result.error %}<p><small>{{ result.error }}</small></p>{% endif %}
+</article>
+{% else %}
+<article class="probe-result probe-failed" role="alert">
+  <p><strong>Could not connect</strong> to the {{ stream }} stream{% if tested_url %} (<code>{{ tested_url }}</code>){% endif %}.</p>
+  <p><small>{{ result.error or "No details were reported." }}</small></p>
+</article>
+{% endif %}
