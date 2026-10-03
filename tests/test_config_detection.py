@@ -421,7 +421,9 @@ def _raw_config() -> dict:
                     }
                 ],
             }
-        ]
+        ],
+        # Since the actions task, a rule may only name a defined action.
+        "actions": [{"name": "phone", "type": "ntfy", "url": "https://ntfy.example", "topic": "t"}],
     }
 
 

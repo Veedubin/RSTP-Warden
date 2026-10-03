@@ -506,10 +506,13 @@ def serve(
     an admin user (credentials from WARDEN_ADMIN_USERNAME / WARDEN_ADMIN_PASSWORD,
     or a generated password printed to the log).
     """
+    from .actions.base import quiet_http_loggers
     from .db.bootstrap import bootstrap_database
 
     _load_dotenv()
     setup_logging(verbosity=verbosity)  # type: ignore[arg-type]
+    # httpx logs full request URLs (ntfy topics, webhook ids) at INFO: keep it at WARNING.
+    quiet_http_loggers()
     cfg = _load_cfg(config)
     _require_binaries(cfg)
     # Only after the config is known good; an admin user is only useful with the web UI.

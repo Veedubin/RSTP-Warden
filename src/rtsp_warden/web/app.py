@@ -20,7 +20,6 @@ from ..config import AppConfig
 from .auth_depends import LoginRequired
 from .config import WebSettings
 from .paths import STATIC_DIR
-from .routes.alerts import router as alerts_router
 from .routes.auth import router as auth_router
 from .routes.cameras import router as cameras_router
 from .routes.dashboard import router as dashboard_router
@@ -80,14 +79,6 @@ def create_app(
     app.state.config_path = str(config_path) if config_path is not None else None
     app.state.runtime = runtime
 
-    # --- AlertManager (lazy init — populated when cfg is set or runtime starts) ---
-    from ..alerts.manager import AlertManager
-
-    if cfg is not None and cfg.alerts.enabled:
-        app.state.alert_manager = AlertManager(cfg.alerts)
-    else:
-        app.state.alert_manager = None
-
     # --- Security middleware (CSRF + context) ---
     install_security(app)
 
@@ -112,7 +103,6 @@ def create_app(
     app.include_router(users_router)
     app.include_router(tokens_router)
     app.include_router(settings_router)
-    app.include_router(alerts_router)
     app.include_router(onvif_router)
     app.include_router(zones_router)
 

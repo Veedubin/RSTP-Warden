@@ -754,6 +754,141 @@ class AlertsConfig(BaseModel):
     notifiers: list[NotifierSpec] = Field(default_factory=list)
 
 
+# --- Actions (spec 8.1): replaces alerts.notifiers ---
+
+
+class _ActionSpecBase(BaseModel):
+    """Fields and checks shared by every action type.
+
+    ``extra="forbid"`` catches typos such as ``tpoic:``. ``hide_input_in_errors``
+    keeps tokens and credential-bearing URLs out of validation messages.
+    """
+
+    model_config = {"extra": "forbid", "hide_input_in_errors": True}
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _name_valid(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("action name must be non-empty")
+        if len(v2) > 64:
+            raise ValueError("action name must be at most 64 characters")
+        if "/" in v2:
+            raise ValueError("action name must not contain '/'")
+        return v2
+
+
+class NtfyActionSpec(_ActionSpecBase):
+    """Publish to an ntfy server: ``POST {url}/{topic}`` (or ``{url}`` without a topic)."""
+
+    type: Literal["ntfy"]
+    url: str
+    topic: str | None = None
+    token: str | None = None
+    priority: int | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _url_nonempty(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("url must be non-empty")
+        return v2
+
+    @field_validator("priority")
+    @classmethod
+    def _priority_range(cls, v: int | None) -> int | None:
+        if v is not None and not 1 <= v <= 5:
+            raise ValueError("priority must be between 1 and 5")
+        return v
+
+
+class WebhookActionSpec(_ActionSpecBase):
+    """Send the event payload as JSON to ``url``."""
+
+    type: Literal["webhook"]
+    url: str
+    method: Literal["POST", "PUT"] = "POST"
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("url")
+    @classmethod
+    def _url_nonempty(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("url must be non-empty")
+        return v2
+
+    @field_validator("headers")
+    @classmethod
+    def _headers_ascii(cls, v: dict[str, str]) -> dict[str, str]:
+        for key, value in v.items():
+            if not (key.isascii() and value.isascii()):
+                raise ValueError(f"header {key!r} must be ASCII (name and value)")
+        return v
+
+
+class AppriseActionSpec(_ActionSpecBase):
+    """Deliver through Apprise URLs (mailto://, tgram://, discord://, mqtt://, ...)."""
+
+    type: Literal["apprise"]
+    urls: list[str]
+
+    @field_validator("urls")
+    @classmethod
+    def _urls_nonempty(cls, v: list[str]) -> list[str]:
+        cleaned = [u.strip() for u in v if u.strip()]
+        if not cleaned:
+            raise ValueError("urls must contain at least one non-empty Apprise URL")
+        return cleaned
+
+
+ActionSpec = Annotated[
+    NtfyActionSpec | WebhookActionSpec | AppriseActionSpec, Field(discriminator="type")
+]
+
+# Legacy notifier keys that have no meaning for actions (named in the deprecation warning).
+_LEGACY_IGNORED_KEYS = ("severities", "min_interval_seconds", "min_severity", "title_template")
+
+
+def _legacy_to_action(
+    legacy: NtifySpec | WebhookSpec | AppriseSpec,
+) -> NtfyActionSpec | WebhookActionSpec | AppriseActionSpec:
+    """Project a validated legacy notifier onto the matching action model."""
+    target: type[NtfyActionSpec] | type[WebhookActionSpec] | type[AppriseActionSpec]
+    if isinstance(legacy, NtifySpec):
+        target = NtfyActionSpec
+    elif isinstance(legacy, WebhookSpec):
+        target = WebhookActionSpec
+    else:
+        target = AppriseActionSpec
+    data = legacy.model_dump(include=set(target.model_fields))
+    try:
+        return target.model_validate(data)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(part) for part in first["loc"])
+        prefix = f"{where}: " if where else ""
+        raise ValueError(
+            f"alerts.notifiers entry {legacy.name!r} cannot become an action: "
+            f"{prefix}{first['msg']}"
+        ) from None
+
+
+def _duplicate_names(names: list[str]) -> list[str]:
+    """Names that occur more than once, in first-repeat order."""
+    seen: set[str] = set()
+    dups: list[str] = []
+    for name in names:
+        if name in seen and name not in dups:
+            dups.append(name)
+        seen.add(name)
+    return dups
+
+
 class OnvifConfig(BaseModel):
     """ONVIF camera discovery + PTZ + events config.
 
@@ -856,9 +991,94 @@ class AppConfig(BaseModel):
     cameras: list[CameraConfig]
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    actions: list[ActionSpec] = Field(default_factory=list)
     onvif: OnvifConfig = Field(default_factory=OnvifConfig)
     clips: ClipsConfig = Field(default_factory=ClipsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)  # global fallback
+
+    @model_validator(mode="after")
+    def _migrate_legacy_notifiers(self) -> AppConfig:
+        """Map deprecated ``alerts.notifiers`` onto ``actions`` (one release only).
+
+        Runs only when the list is non-empty: every dump carries an empty
+        ``alerts`` block. ``enabled: true`` entries move to ``actions``;
+        ``enabled: false`` entries stay where they are; ``alerts.enabled`` is
+        ignored. A fresh ``AlertsConfig`` is assigned so a caller's instance is
+        never mutated. The warning goes through ``_warn_once``: once per process.
+        """
+        if not self.alerts.notifiers:
+            return self
+        moved: list[NtfyActionSpec | WebhookActionSpec | AppriseActionSpec] = []
+        kept: list[NtifySpec | WebhookSpec | AppriseSpec] = []
+        ignored: list[str] = []
+        for legacy in self.alerts.notifiers:
+            if not legacy.enabled:
+                kept.append(legacy)
+                continue
+            moved.append(_legacy_to_action(legacy))
+            ignored.extend(
+                f"{legacy.name}.{key}"
+                for key in _LEGACY_IGNORED_KEYS
+                if key in legacy.model_fields_set
+            )
+        names = [a.name for a in self.actions] + [a.name for a in moved] + [n.name for n in kept]
+        dups = _duplicate_names(names)
+        if dups:
+            raise ValueError(
+                f"action name {dups[0]!r} is defined more than once across actions and "
+                "alerts.notifiers; action names must be unique"
+            )
+        self.actions = [*self.actions, *moved]
+        self.alerts = AlertsConfig(enabled=self.alerts.enabled, notifiers=kept)
+        parts: list[str] = []
+        if moved:
+            parts.append("moved to actions: " + ", ".join(a.name for a in moved))
+        if ignored:
+            parts.append(
+                "ignored (rate limits now come from rules[].cooldown_seconds): "
+                + ", ".join(ignored)
+            )
+        if kept:
+            parts.append(
+                "left in alerts.notifiers because enabled is false: "
+                + ", ".join(n.name for n in kept)
+            )
+        if not self.alerts.enabled:
+            parts.append("alerts.enabled: false is ignored")
+        _warn_once(
+            "alerts.notifiers",
+            "alerts.notifiers is deprecated and will be removed in the next release; %s. "
+            "Move these entries under the top-level actions: key.",
+            "; ".join(parts),
+        )
+        return self
+
+    @model_validator(mode="after")
+    def _check_action_names(self) -> AppConfig:
+        """Action names are unique, and every ``rules[].actions`` name exists (spec 8.2)."""
+        names = [a.name for a in self.actions]
+        dups = _duplicate_names(names)
+        if dups:
+            raise ValueError(f"action name {dups[0]!r} is defined more than once in actions")
+        known = set(names)
+        disabled = {n.name for n in self.alerts.notifiers}
+        for cam in self.cameras:
+            for rule in cam.rules:
+                for action_name in rule.actions:
+                    if action_name in known:
+                        continue
+                    defined = ", ".join(sorted(known)) or "none"
+                    hint = ""
+                    if action_name in disabled:
+                        hint = (
+                            f"; {action_name!r} is under alerts.notifiers with enabled: false,"
+                            " so it was not moved to actions"
+                        )
+                    raise ValueError(
+                        f"camera {cam.name!r} rule {rule.name!r} names unknown action "
+                        f"{action_name!r} (defined actions: {defined}){hint}"
+                    )
+        return self
 
     @model_validator(mode="after")
     def _validate_labels(self) -> AppConfig:
