@@ -599,15 +599,16 @@ Models are stored in `./data/models` (`WARDEN_MODELS_DIR` in `docker-compose.yml
 
 Without a GPU, YOLOX runs on the CPU (see Detection for the expected cost). To use an NVIDIA GPU:
 
-**Docker.** Install the NVIDIA driver and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host (`nvidia-smi` must work and report CUDA 13 or newer), then start with the GPU overlay. It builds `Dockerfile.cuda` (the slim image with `onnxruntime-gpu` and NVIDIA's CUDA 13 / cuDNN 9 Python wheels, a multi-gigabyte image) and reserves the GPU for the container:
+**Docker.** Install the NVIDIA driver and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host (`nvidia-smi` must work and report CUDA 13 or newer), generate the toolkit's CDI spec once, then start with the GPU overlay. It builds `Dockerfile.cuda` (the slim image with `onnxruntime-gpu` and NVIDIA's CUDA 13 / cuDNN 9 Python wheels, a multi-gigabyte image) and hands the GPU to the container through CDI (Docker 25 or newer):
 
 ```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 docker compose logs warden | grep "provider:"
 # onnx detector onnx (model yolox-s, device auto) provider: CUDAExecutionProvider
 ```
 
-The line appears once the model is loaded (on the first frame when it still had to be downloaded). `CPUExecutionProvider` there means CUDA did not load: check `nvidia-smi` on the host and the container toolkit. With `device: cuda` the camera card also shows a warning badge.
+The line appears once the model is loaded (on the first frame when it still had to be downloaded). `CPUExecutionProvider` there means CUDA did not load: check `nvidia-smi` on the host and `docker run --rm --device nvidia.com/gpu=all rtsp-warden:cuda nvidia-smi -L`. With `device: cuda` the camera card also shows a warning badge. If your host registers the toolkit's runtime with Docker instead (`nvidia-ctk runtime configure --runtime=docker`), the overlay's comment shows the classic `driver: nvidia` reservation to use in its place.
 
 **uv or pip on the host.** The CPU and GPU builds of ONNX Runtime install into the same Python package, so never let both into one environment. From a source checkout:
 

@@ -1,8 +1,12 @@
-# GPU overlay for docker-compose.yml: builds Dockerfile.cuda and reserves the NVIDIA GPU(s).
-# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host. Run with:
+# GPU overlay for docker-compose.yml: builds Dockerfile.cuda and hands the NVIDIA GPU(s) to the container.
+# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host, plus its CDI spec
+# (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`; Docker 25+ reads it). Run with:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 # Detectors with `device: auto` (the default) or `device: cuda` then run on the GPU; the log line
 # "provider: CUDAExecutionProvider" confirms it.
+# On a host where the toolkit's runtime is registered with Docker instead (`nvidia-ctk runtime
+# configure --runtime=docker`), the classic form works as well: replace the `cdi` entry with
+# `- driver: nvidia`, `count: all`, `capabilities: [gpu]`.
 services:
   warden:
     build:
@@ -13,6 +17,6 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: all
+            - driver: cdi
+              device_ids: ["nvidia.com/gpu=all"]
               capabilities: [gpu]

@@ -175,15 +175,17 @@ def test_cuda_image_env_adds_only_the_nvidia_settings() -> None:
 # --- compose -----------------------------------------------------------------------------------
 
 
-def test_gpu_overlay_builds_the_cuda_image_and_reserves_nvidia_gpus() -> None:
+def test_gpu_overlay_builds_the_cuda_image_and_reserves_the_gpu_through_cdi() -> None:
     overlay = yaml.safe_load((REPO / "docker-compose.gpu.yml").read_text(encoding="utf-8"))
     assert list(overlay["services"]) == ["warden"]
     warden = overlay["services"]["warden"]
     assert warden["build"] == {"context": ".", "dockerfile": "Dockerfile.cuda"}
     assert warden["image"] == "rtsp-warden:cuda"
     assert warden["deploy"]["resources"]["reservations"]["devices"] == [
-        {"driver": "nvidia", "count": "all", "capabilities": ["gpu"]}
+        {"driver": "cdi", "device_ids": ["nvidia.com/gpu=all"], "capabilities": ["gpu"]}
     ]
+    # the classic nvidia-runtime form stays documented as the alternative
+    assert "driver: nvidia" in (REPO / "docker-compose.gpu.yml").read_text(encoding="utf-8")
 
 
 def test_gpu_overlay_and_readme_give_the_same_command() -> None:
@@ -231,6 +233,7 @@ def test_readme_gpu_section_gives_the_working_commands() -> None:
     assert GPU_FIX_COMMAND in text
     assert "uv run --no-sync rtsp-warden serve" in text
     assert f"provider: {CUDA_PROVIDER}" in text
+    assert "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml" in text
     assert "PrivateDevices=false" in text
 
 

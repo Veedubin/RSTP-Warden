@@ -26,10 +26,10 @@ One card per unit of work. Status phrases are updated in place; history stays in
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
 - Run the manual camera tests (RW-2/12, RW-3/19) once the camera is free.
-- Install the NVIDIA Container Toolkit if the GPU should run inside Docker; `Dockerfile.cuda` builds and the GPU test passes
-  natively on this host (2026-10-03), only the in-container GPU run is untested.
 
 ## Done 2026-10-03
 - History rewrite (`git filter-repo`, real credentials → `admin:admin`) and force-push of `master` + `v1.3.0`; nothing
   tracked or in history holds the real login any more.
 - `Dockerfile.cuda` built (5.29 GB, onnxruntime-gpu 1.30.0 with the CUDA provider) and `pytest -m gpu` passed on the RTX 4080.
+- GPU in Docker verified after the owner installed the container toolkit: the overlay switched to a CDI reservation (the
+  nvidia runtime is not registered with Docker here), and the container logged `provider: CUDAExecutionProvider`.
