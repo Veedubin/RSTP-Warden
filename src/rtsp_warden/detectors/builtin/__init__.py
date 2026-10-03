@@ -16,6 +16,8 @@ Available detectors:
   (``builtin.vehicle.VehicleDetector``)
 - ``dnn`` -- YOLOv4-tiny DNN detector for vehicles and animals
   (``builtin.dnn.DNNDetector``)
+- ``onnx`` -- ONNX Runtime detector for YOLOX models from the model registry,
+  on CUDA or CPU (``builtin.onnx.OnnxDetector``)
 - ``custom`` -- Template/demo custom detector
   (``builtin.custom.DemoCustomDetector``)
 """

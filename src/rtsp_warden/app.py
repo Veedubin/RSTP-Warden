@@ -612,7 +612,9 @@ class AppRuntime:
         """Build (not set up) the camera's DetectorRunner; None when it has no detectors."""
         if not self.detectors_enabled or not any(s.enabled for s in cam.detectors):
             return None
-        bundle = build_detectors_for_camera(cam, cam.detectors)
+        bundle = build_detectors_for_camera(
+            cam, cam.detectors, models_dir=self.cfg.runtime.models_dir
+        )
         if not bundle.detectors:
             return None
         if self._event_sink is None:

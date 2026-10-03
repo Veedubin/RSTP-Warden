@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import (
@@ -214,12 +215,61 @@ def build_detector(spec: DetectorSpec, camera_name: str) -> Detector:
             )
             return NullDetector()
 
+    if spec.type == "onnx":
+        return _build_onnx_detector(
+            spec, camera_sensitivity=50.0, camera_detect_classes=None, models_dir=None
+        )
+
     if spec.type == "custom":
         if not spec.import_path:
             raise ValueError(f"custom detector requires import_path: {spec}")
         return _build_custom_detector(spec, camera_name)
 
     raise ValueError(f"unknown detector type: {spec.type}")
+
+
+DEFAULT_ONNX_MODEL = "yolox-s"
+
+
+def _default_models_dir() -> Path:
+    """``runtime.models_dir`` when the caller passed none (tests, legacy callers)."""
+    from ..config import RuntimeConfig
+
+    return RuntimeConfig().models_dir
+
+
+def _build_onnx_detector(
+    spec: DetectorSpec,
+    *,
+    camera_sensitivity: float,
+    camera_detect_classes: list[str] | None,
+    models_dir: Path | None,
+) -> Detector:
+    """Build an OnnxDetector from a registry descriptor (no model loading here).
+
+    ``model`` defaults to ``yolox-s``. ``min_confidence`` comes from the spec, else
+    from the camera sensitivity (0.5 at the default sensitivity of 50). The camera's
+    ``detect_classes`` filters the model labels (None = every label). Raises
+    ``ModelNotFound`` for an unknown model name.
+    """
+    from .builtin.onnx import OnnxDetector
+    from .model_registry import load_descriptor
+
+    resolved_dir = models_dir if models_dir is not None else _default_models_dir()
+    descriptor = load_descriptor(spec.model or DEFAULT_ONNX_MODEL, resolved_dir)
+    min_confidence = (
+        spec.min_confidence
+        if spec.min_confidence is not None
+        else apply_sensitivity_to_confidence(camera_sensitivity)
+    )
+    classes = list(camera_detect_classes) if camera_detect_classes is not None else None
+    return OnnxDetector(
+        descriptor=descriptor,
+        models_dir=resolved_dir,
+        device=spec.device,
+        min_confidence=min_confidence,
+        classes=classes,
+    )
 
 
 def _build_custom_detector(spec: DetectorSpec, camera_name: str) -> Detector:
@@ -296,6 +346,8 @@ def build_detector_with_sensitivity(
     camera_name: str,
     camera_sensitivity: float = 50.0,
     camera_detect_classes: list[str] | None = None,
+    *,
+    models_dir: Path | None = None,
 ) -> Detector:
     """Build a Detector from a DetectorSpec, applying camera-level sensitivity and class filter.
 
@@ -433,6 +485,14 @@ def build_detector_with_sensitivity(
             )
             return NullDetector()
 
+    if spec.type == "onnx":
+        return _build_onnx_detector(
+            spec,
+            camera_sensitivity=camera_sensitivity,
+            camera_detect_classes=camera_detect_classes,
+            models_dir=models_dir,
+        )
+
     if spec.type == "custom":
         if not spec.import_path:
             raise ValueError(f"custom detector requires import_path: {spec}")
@@ -471,6 +531,8 @@ def build_grid_masks_from_config(
 def build_detectors_for_camera(
     camera_cfg: CameraConfig,
     base_specs: list[DetectorSpec],
+    *,
+    models_dir: Path | None = None,
 ) -> CameraDetectorBundle:
     """Build all detectors, masks, ROI, and grid masks for a single camera.
 
@@ -480,6 +542,8 @@ def build_detectors_for_camera(
     Args:
         camera_cfg: The camera configuration with sensitivity, detect_classes, zones.
         base_specs: The list of DetectorSpec from the camera config.
+        models_dir: Where ``onnx`` models live (``runtime.models_dir``); None uses
+            the default from ``RuntimeConfig``.
 
     Returns:
         A CameraDetectorBundle with detectors, masks, roi, and grid_masks.
@@ -498,6 +562,7 @@ def build_detectors_for_camera(
                 camera_name=camera_cfg.name,
                 camera_sensitivity=camera_cfg.sensitivity,
                 camera_detect_classes=camera_cfg.detect_classes,
+                models_dir=models_dir,
             )
             detectors.append(det)
         except Exception:
@@ -534,6 +599,7 @@ def build_detectors_for_camera(
 
 
 __all__ = [
+    "DEFAULT_ONNX_MODEL",
     "DetectorSpec",
     "DetectorType",
     "build_detector",
