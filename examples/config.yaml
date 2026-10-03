@@ -1,9 +1,9 @@
-# Minimal single-camera example. user:pass below are placeholders, not credentials;
+# Minimal single-camera example. admin:admin below are placeholders, not credentials;
 # see examples/configs/ for ${CAM_USER}/${CAM_PASS} environment references.
 cameras:
   - name: front
-    main_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/101
-    sub_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/102
+    main_url: rtsp://admin:admin@192.168.1.50:554/Streaming/Channels/101
+    sub_url: rtsp://admin:admin@192.168.1.50:554/Streaming/Channels/102
 
     record:
       enabled: true

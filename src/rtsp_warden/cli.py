@@ -32,7 +32,7 @@ SAMPLE_CONFIG_YAML = """# rtsp-warden starter config, written by `rtsp-warden in
 # the environment, or from a .env file next to this config.yaml (a .env in the
 # directory you start rtsp-warden from works too). Example .env:
 #   CAM_USER=admin
-#   CAM_PASS=your-camera-password
+#   CAM_PASS=admin
 # Percent-encode @ : / ? # % in those values (p@ss becomes p%40ss).
 # Cameras added from the web UI get their own CAM_<NAME>_USER / CAM_<NAME>_PASS
 # variables, written to that same .env file.

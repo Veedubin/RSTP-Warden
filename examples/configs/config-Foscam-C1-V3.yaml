@@ -2,7 +2,7 @@
 # no sub_url and the main stream feeds recording, the live preview and detection.
 # Credentials come from environment variables (see .env):
 #   CAM_USER=admin
-#   CAM_PASS=your-camera-password
+#   CAM_PASS=admin
 # rtsp-warden expands ${NAME} references in config.yaml at load time.
 cameras:
   - name: front

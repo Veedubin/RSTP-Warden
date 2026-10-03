@@ -54,7 +54,7 @@ rtsp-warden install
 # 3. Create a starter config, and put the camera login in a .env file next to it
 #    (the template reads ${CAM_USER} / ${CAM_PASS}; percent-encode @ : / ? # %)
 rtsp-warden init-config --out config.yaml
-[ -e .env ] || (umask 077 && printf 'CAM_USER=admin\nCAM_PASS=your-camera-password\n' > .env)
+[ -e .env ] || (umask 077 && printf 'CAM_USER=admin\nCAM_PASS=admin\n' > .env)
 #    ^ creates .env (mode 600) only if it does not exist; otherwise add the two lines to it
 # Edit config.yaml: set your camera's address and stream path
 
@@ -80,7 +80,7 @@ cp examples/configs/config-Foscam-C1-V3.yaml config/config.yaml
 $EDITOR config/config.yaml
 
 # The samples read camera credentials from the environment; put them in .env
-printf 'CAM_USER=admin\nCAM_PASS=your-camera-password\n' > .env
+printf 'CAM_USER=admin\nCAM_PASS=admin\n' > .env
 
 # Run
 docker compose up -d
@@ -203,8 +203,8 @@ The old `alerts:` section still loads for one release; see [Upgrading from 1.3](
 ```yaml
 cameras:
   - name: front_door                       # required, unique
-    main_url: rtsp://user:pass@host:554/... # required
-    sub_url:  rtsp://user:pass@host:554/... # optional; proxy and frame tap fall back to main, sub recording is skipped
+    main_url: rtsp://admin:admin@host:554/... # required
+    sub_url:  rtsp://admin:admin@host:554/... # optional; proxy and frame tap fall back to main, sub recording is skipped
     # Credentials can come from the environment: rtsp://${CAM_USER}:${CAM_PASS}@host:554/...
 
     record:

@@ -26,7 +26,7 @@ services:
       # ONNX models download here on first use; inside ./data, so they survive rebuilds
       WARDEN_MODELS_DIR: /app/data/models
       # First-start admin (optional; a password is generated and logged otherwise)
-      # WARDEN_ADMIN_PASSWORD: change-me
+      # WARDEN_ADMIN_PASSWORD: admin
       # Camera credentials referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}
       CAM_USER: ${CAM_USER:-admin}
       CAM_PASS: ${CAM_PASS:-}
