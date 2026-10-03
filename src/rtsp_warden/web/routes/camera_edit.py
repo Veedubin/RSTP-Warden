@@ -1,4 +1,7 @@
-"""Add-camera routes: the form, "Test connection", ONVIF URL fill, and save + hot-add.
+"""Camera add, edit and delete routes.
+
+Add: the form, "Test connection", ONVIF URL fill, and save + hot-add. Edit and delete:
+the camera detail page's buttons (only changed keys are written; delete keeps files).
 
 Every handler is a plain ``def``: FastAPI runs it in the threadpool, so the ffprobe run,
 the ONVIF lookup and the wait for the runtime never block the event loop.
@@ -18,22 +21,39 @@ import os
 import re
 import threading
 from collections.abc import Mapping
+from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
 import yaml
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from ... import probe
+from ...app import CameraNotFoundError
+from ...config import AppConfig, CameraConfig
 from ...ffmpeg import redact_text
 from ...onvif import media as onvif_media
 from ...onvif.discovery import OnvifError
+from ...onvif.events import get_active_subscribers, unregister_subscriber
 from ..auth_depends import CurrentUser, require_admin
-from ..env_file import read_env_file, upsert_env_vars
+from ..env_file import read_env_file, remove_env_vars, upsert_env_vars
 from ..services import camera_config
-from ._common import get_cfg, get_config_path, set_flash, templates
+from ..services.camera_edit import (
+    CameraEditError,
+    EditCameraInput,
+    apply_plan,
+    apply_to_running_config,
+    edit_form_values,
+    plan_camera_edit,
+    read_camera_entry,
+    split_userinfo,
+)
+from ._common import find_camera, get_cfg, get_config_path, set_flash, templates
 
 log = logging.getLogger(__name__)
 
@@ -479,3 +499,378 @@ def create_camera(
     else:
         set_flash(response, f"Camera {name} added and started.", "success")
     return response
+
+
+# --- Edit and delete from the camera detail page (RW-2 Task 8) ---------------------------
+
+# Seconds edit and delete wait for the supervisor to restart or remove the camera.
+# Stopping one ingest alone can take ~10 s; after this the request goes on in the background.
+RUNTIME_REQUEST_TIMEOUT_S = 30.0
+
+_NO_CONFIG_FILE = (
+    "This server was started without a config file, so cameras cannot be edited "
+    "or deleted from the web UI."
+)
+
+
+def _redirect_flash(
+    url: str, message: str, level: Literal["info", "success", "error"] = "info"
+) -> RedirectResponse:
+    """303 to ``url`` with a one-shot flash message for the next page."""
+    response = RedirectResponse(url, status_code=303)
+    set_flash(response, message, level)
+    return response
+
+
+def _render_edit_form(
+    request: Request,
+    cam: CameraConfig,
+    *,
+    values: dict[str, object],
+    errors: dict[str, str],
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render cameras/form.html in "edit" mode."""
+    return templates.TemplateResponse(
+        request,
+        "cameras/form.html",
+        {
+            "request": request,
+            "mode": "edit",
+            "title": f"Edit camera {cam.name}",
+            "subtitle": (
+                "Saved to config.yaml. A new user name or password goes to the .env file "
+                "next to it, never into config.yaml."
+            ),
+            "form_action": f"/cameras/{cam.name}/edit",
+            "values": values,
+            "errors": errors,
+        },
+        status_code=status_code,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeOutcome:
+    """How a queued runtime request ended, as far as the route waited for it.
+
+    ``absent``: no runtime is attached, or it does not run this camera (the change
+    applies on the next start); ``done``: applied; ``pending``: still queued or running
+    when the wait ended (it goes on in the background, never cancelled); ``failed``:
+    the request failed and ``error`` says why (credentials masked).
+    """
+
+    state: Literal["absent", "done", "pending", "failed"]
+    error: str = ""
+
+
+def _request_runtime(request: Request, method: str, name: str) -> Future[None] | None:
+    """Queue ``app.state.runtime.<method>(name)``; None when no runtime is attached.
+
+    The ``request_*`` methods only enqueue: they never block and never raise.
+    """
+    runtime = getattr(request.app.state, "runtime", None)
+    call = getattr(runtime, method, None)
+    return None if call is None else call(name)
+
+
+def _outcome(future: Future[None] | None, exc: BaseException | None) -> _RuntimeOutcome:
+    """Classify a wait on ``future`` that ended with ``exc`` (None: it succeeded)."""
+    if future is None:
+        return _RuntimeOutcome("absent")
+    if exc is None:
+        return _RuntimeOutcome("done")
+    if not future.done():
+        return _RuntimeOutcome("pending")
+    if isinstance(exc, CameraNotFoundError):
+        return _RuntimeOutcome("absent")
+    return _RuntimeOutcome("failed", _error_text(exc))
+
+
+def _wait_for_runtime(request: Request, method: str, name: str) -> _RuntimeOutcome:
+    """Queue ``app.state.runtime.<method>(name)`` and wait (blocking) for the supervisor.
+
+    For ``def`` routes, which run in the threadpool.
+    """
+    future = _request_runtime(request, method, name)
+    if future is None:
+        return _outcome(None, None)
+    try:
+        future.result(timeout=RUNTIME_REQUEST_TIMEOUT_S)
+    except BaseException as exc:  # SystemExit too: an unknown proxy mode fails with it
+        outcome = _outcome(future, exc)
+    else:
+        outcome = _outcome(future, None)
+    _log_outcome(method, name, outcome)
+    return outcome
+
+
+async def _await_runtime(request: Request, method: str, name: str) -> _RuntimeOutcome:
+    """Like ``_wait_for_runtime`` for ``async def`` routes, without blocking the event loop.
+
+    ``asyncio.shield`` keeps a timeout from cancelling the wrapped future: an
+    ``asyncio.wait_for`` timeout would otherwise cancel a request that is still queued,
+    and the supervisor would then skip it.
+    """
+    future = _request_runtime(request, method, name)
+    if future is None:
+        return _outcome(None, None)
+    wrapped = asyncio.wrap_future(future)
+    # Fetch a late failure so asyncio does not log "exception was never retrieved".
+    wrapped.add_done_callback(lambda f: f.cancelled() or f.exception())
+    try:
+        await asyncio.wait_for(asyncio.shield(wrapped), timeout=RUNTIME_REQUEST_TIMEOUT_S)
+    except BaseException as exc:  # SystemExit too: an unknown proxy mode fails with it
+        if isinstance(exc, asyncio.CancelledError) and not future.done():
+            raise  # the request itself was cancelled (client gone, server stopping)
+        outcome = _outcome(future, exc)
+    else:
+        outcome = _outcome(future, None)
+    _log_outcome(method, name, outcome)
+    return outcome
+
+
+def _log_outcome(method: str, name: str, outcome: _RuntimeOutcome) -> None:
+    if outcome.state == "pending":
+        log.warning(
+            "%s(%s) did not finish within %gs; it goes on in the background",
+            method,
+            name,
+            RUNTIME_REQUEST_TIMEOUT_S,
+        )
+    elif outcome.state == "failed":
+        log.warning("%s(%s) failed: %s", method, name, outcome.error)
+
+
+@router.get("/{name}/edit", response_class=HTMLResponse)
+def camera_edit_form(
+    request: Request, name: str, user: CurrentUser = Depends(require_admin)
+) -> Response:
+    """Edit form for one camera, filled from its raw config.yaml entry (admin only)."""
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
+    if cam is None:
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
+    config_path = get_config_path(request)
+    if config_path is None:
+        return _redirect_flash(f"/cameras/{name}", _NO_CONFIG_FILE, "error")
+    try:
+        raw = read_camera_entry(config_path, name)
+    except (OSError, KeyError, yaml.YAMLError):
+        return _redirect_flash(
+            f"/cameras/{name}", f"Camera {name} was not found in {config_path}.", "error"
+        )
+    return _render_edit_form(request, cam, values=edit_form_values(raw, cam), errors={})
+
+
+@router.post("/{name}/edit", response_class=HTMLResponse)
+def camera_edit_submit(
+    request: Request,
+    name: str,
+    main_url: str = Form(""),
+    sub_url: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(""),
+    onvif_port: str = Form(""),
+    record_enabled: str = Form(""),
+    user: CurrentUser = Depends(require_admin),
+) -> Response:
+    """Save the edit form: patch only the changed keys, then restart the camera if needed."""
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
+    if cam is None:
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
+    config_path = get_config_path(request)
+    if config_path is None:
+        return _redirect_flash(f"/cameras/{name}", _NO_CONFIG_FILE, "error")
+    inp = EditCameraInput(
+        main_url=main_url,
+        sub_url=sub_url,
+        username=username,
+        password=password,
+        onvif_port=onvif_port,
+        record_enabled=record_enabled == "on",
+    )
+    values: dict[str, object] = {
+        "name": cam.name,
+        "username": username,
+        "main_url": split_userinfo(main_url.strip())[1],
+        "sub_url": split_userinfo(sub_url.strip())[1],
+        "onvif_port": onvif_port.strip(),
+        "record_enabled": inp.record_enabled,
+        "password_entered": bool(password),
+        "proxy_port": cam.proxy.port,
+    }
+
+    with _config_edit_lock:
+        try:
+            raw = read_camera_entry(config_path, name)
+        except (OSError, KeyError, yaml.YAMLError):
+            return _redirect_flash(
+                f"/cameras/{name}", f"Camera {name} was not found in {config_path}.", "error"
+            )
+        try:
+            plan = plan_camera_edit(raw, cam, inp)
+            updated = camera_config.validate_entry(
+                apply_plan(raw, plan), {**os.environ, **plan.env_values}
+            )
+        except CameraEditError as exc:
+            errors = {exc.field_name: str(exc)}
+            return _render_edit_form(request, cam, values=values, errors=errors, status_code=422)
+        except ValueError as exc:
+            errors = {"form": redact_text(str(exc))}
+            return _render_edit_form(request, cam, values=values, errors=errors, status_code=422)
+        if plan.is_empty:
+            return _redirect_flash(f"/cameras/{name}", "Nothing changed.", "info")
+
+        try:
+            # .env first: config.yaml must never reference a variable that is not there.
+            if plan.env_values:
+                upsert_env_vars(config_path.parent / ".env", plan.env_values)
+            camera_config.patch_camera(config_path, name, plan.patch, remove_keys=plan.remove_keys)
+        except KeyError:
+            return _redirect_flash(
+                f"/cameras/{name}", f"Camera {name} was not found in {config_path}.", "error"
+            )
+        except ValueError as exc:
+            return _redirect_flash(
+                f"/cameras/{name}", f"Could not save camera {name}: {exc}", "error"
+            )
+        except OSError as exc:
+            log.warning("could not save camera %s: %s", name, exc)
+            return _redirect_flash(
+                f"/cameras/{name}",
+                f"Could not save camera {name}: {exc.strerror or exc} "
+                f"({exc.filename or config_path}). Make {config_path.parent} writable "
+                "by rtsp-warden and try again.",
+                "error",
+            )
+        if plan.env_values:
+            os.environ.update(plan.env_values)
+        apply_to_running_config(cam, updated)
+        changed = [*plan.patch, *plan.remove_keys, *(["login"] if plan.env_values else [])]
+        log.info("camera %s edited from the web UI: %s", name, ", ".join(changed))
+
+    message = f"Camera {name} saved."
+    level: Literal["info", "success", "error"] = "success"
+    if plan.restart:
+        outcome = _wait_for_runtime(request, "request_restart_camera", name)
+        if outcome.state == "absent":
+            message += " The change takes effect when rtsp-warden restarts."
+        elif outcome.state == "pending":
+            message = (
+                f"Camera {name} saved; the camera is still restarting. "
+                "Its status below updates on its own."
+            )
+            level = "info"
+        elif outcome.state == "failed":
+            message = (
+                f"Camera {name} saved, but the running camera could not be restarted: "
+                f"{outcome.error}"
+            )
+            level = "error"
+        else:
+            message += " Its stream was restarted."
+    return _redirect_flash(f"/cameras/{name}", message, level)
+
+
+async def _stop_onvif_subscription(name: str) -> None:
+    """Stop and unregister the camera's ONVIF event subscription, if one is running.
+
+    Subscribers are asyncio tasks on this event loop (``onvif/events.py`` registry),
+    which is why ``camera_delete`` is an ``async def`` route.
+    """
+    subscriber = get_active_subscribers().get(name)
+    if subscriber is None:
+        return
+    try:
+        await asyncio.wait_for(subscriber.stop(), timeout=10.0)
+    except Exception:
+        log.warning("stopping the ONVIF event subscription of %s failed", name, exc_info=True)
+    finally:
+        unregister_subscriber(name)
+
+
+def _remove_from_config(cfg: AppConfig, config_path: Path, name: str) -> str | None:
+    """Drop camera ``name`` from config.yaml and ``cfg.cameras`` under the edit lock.
+
+    Returns None on success (a camera already missing from the file counts as removed),
+    otherwise an error text for the flash message; then nothing was changed.
+    """
+    with _config_edit_lock:
+        try:
+            camera_config.remove_camera(config_path, name)
+        except KeyError:
+            log.info("camera %s was already missing from %s", name, config_path)
+        except ValueError as exc:
+            return f"Could not delete camera {name}: {exc}"
+        except OSError as exc:
+            log.warning("could not delete camera %s: %s", name, exc)
+            return (
+                f"Could not delete camera {name}: {exc.strerror or exc} "
+                f"({exc.filename or config_path}). Make {config_path.parent} writable "
+                "by rtsp-warden and try again."
+            )
+        cfg.cameras = [c for c in cfg.cameras if c.name != name]
+        _forget_credentials(config_path, name)
+    log.info("camera %s deleted from the web UI", name)
+    return None
+
+
+def _forget_credentials(config_path: Path, name: str) -> None:
+    """Drop a deleted camera's ``CAM_<SLUG>_*`` from .env and os.environ if unused.
+
+    A hand-written camera may reference the same variables; then they stay. Without
+    this, adding a camera of the same name with another login would be refused.
+    """
+    keys = camera_config.env_var_names(camera_config.env_slug(name))
+    try:
+        still_used = camera_config.referenced_env_vars(config_path)
+        unused = [key for key in keys if key not in still_used]
+        remove_env_vars(config_path.parent / ".env", unused)
+    except (OSError, ValueError) as exc:
+        log.warning("could not remove the login of camera %s from the .env file: %s", name, exc)
+        return
+    for key in unused:
+        os.environ.pop(key, None)
+
+
+@router.post("/{name}/delete")
+async def camera_delete(
+    request: Request, name: str, user: CurrentUser = Depends(require_admin)
+) -> Response:
+    """Remove a camera from config.yaml, cfg and the runtime; its files stay on disk."""
+    cfg = get_cfg(request)
+    cam = find_camera(cfg, name)
+    if cam is None:
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
+    config_path = get_config_path(request)
+    if config_path is None:
+        return _redirect_flash(f"/cameras/{name}", _NO_CONFIG_FILE, "error")
+
+    error = await run_in_threadpool(_remove_from_config, cfg, config_path, name)
+    if error:
+        return _redirect_flash(f"/cameras/{name}", error, "error")
+    await _stop_onvif_subscription(name)
+    outcome = await _await_runtime(request, "request_remove_camera", name)
+
+    kept = cam.record.output_dir / name
+    if outcome.state == "pending":
+        return _redirect_flash(
+            "/cameras",
+            f"Camera {name} removed from {config_path.name}; the runtime is still stopping it. "
+            f"Its files were kept in {kept}.",
+            "info",
+        )
+    if outcome.state == "failed":
+        return _redirect_flash(
+            "/cameras",
+            f"Camera {name} was removed from {config_path.name}, but the running camera could "
+            f"not be stopped: {outcome.error}. Its files were kept in {kept}.",
+            "error",
+        )
+    return _redirect_flash(
+        "/cameras",
+        f"Camera {name} removed. Its recordings, thumbnails and clips were kept in {kept}.",
+        "success",
+    )

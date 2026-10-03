@@ -260,6 +260,11 @@ def raw_camera_names(config_path: Path) -> list[str]:
     return [name for name in (_entry_name(e) for e in _read_raw(config_path)["cameras"]) if name]
 
 
+def referenced_env_vars(config_path: Path) -> set[str]:
+    """Every ``${VAR}`` name config.yaml mentions (comments too, to stay on the safe side)."""
+    return set(_ENV_REF.findall(config_path.read_text(encoding="utf-8")))
+
+
 def _find_entry(data: dict[str, Any], name: str) -> dict[str, Any]:
     for entry in data["cameras"]:
         if _entry_name(entry) == name:

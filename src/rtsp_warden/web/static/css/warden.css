@@ -324,3 +324,10 @@ a.button.outline.secondary {
 [data-theme="dark"] .status-degraded {
   color: #ffb74d;
 }
+
+/* Forms inside a page header action row (the camera Delete button): no Pico bottom margin,
+   so the button lines up with the links next to it. */
+.page-actions form,
+.page-actions [type="submit"] {
+  margin-bottom: 0;
+}

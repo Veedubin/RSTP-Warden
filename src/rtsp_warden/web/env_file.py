@@ -11,7 +11,7 @@ import fcntl
 import logging
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -53,11 +53,7 @@ def upsert_env_vars(path: Path, values: Mapping[str, str]) -> None:
     if not values:
         return
 
-    lock_path = path.with_suffix(".lock")
-    lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    def edit(lines: list[str]) -> list[str]:
         pending = dict(values)
         written: set[str] = set()
         out: list[str] = []
@@ -73,19 +69,61 @@ def upsert_env_vars(path: Path, values: Mapping[str, str]) -> None:
             out.append(line)
         for key, value in pending.items():
             out.append(f"{key}={_quote_value(value)}")
+        return out
 
+    _locked_rewrite(path, edit)
+    log.info("Updated %s: %s", path, ", ".join(sorted(values)))
+
+
+def remove_env_vars(path: Path, keys: Iterable[str]) -> None:
+    """Delete every ``KEY=`` line for ``keys`` from the .env file at ``path``.
+
+    Same locking, atomic replace and mode 0600 as ``upsert_env_vars``. A missing file,
+    or keys that are not in it, change nothing. Values are never logged.
+    """
+    doomed = set(keys)
+    if not doomed or not path.exists():
+        return
+    found: set[str] = set()
+
+    def edit(lines: list[str]) -> list[str]:
+        out: list[str] = []
+        for line in lines:
+            key = _line_key(line)
+            if key is not None and key in doomed:
+                found.add(key)
+                continue
+            out.append(line)
+        return out
+
+    _locked_rewrite(path, edit)
+    if found:
+        log.info("Removed from %s: %s", path, ", ".join(sorted(found)))
+
+
+def _locked_rewrite(path: Path, edit: Callable[[list[str]], list[str]]) -> None:
+    """Rewrite ``path`` as ``edit(current lines)`` under an exclusive flock, mode 0600.
+
+    The lock file is ``path.with_suffix(".lock")`` (``.env`` -> ``.env.lock``); the new
+    content goes through a temp file and ``os.replace``.
+    """
+    lock_path = path.with_suffix(".lock")
+    lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        out = edit(lines)
         tmp = path.with_name(path.name + ".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.fchmod(fd, 0o600)
-            os.write(fd, ("\n".join(out) + "\n").encode("utf-8"))
+            os.write(fd, ("\n".join(out) + "\n" if out else "").encode("utf-8"))
         finally:
             os.close(fd)
         os.replace(tmp, path)
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
-    log.info("Updated %s: %s", path, ", ".join(sorted(values)))
 
 
 def read_env_file(path: Path) -> dict[str, str]:

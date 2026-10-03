@@ -6,9 +6,14 @@
 {% set subtitle = "Live view, status and settings" %}
 {% include "partials/page_header.html" %}
 {% if is_admin %}
-<p class="page-actions" id="camera-actions">
+<div class="page-actions" id="camera-actions">
   <a href="/cameras/{{ camera.name }}/edit" role="button" class="secondary outline">Edit camera</a>
-</p>
+  <form method="post" action="/cameras/{{ camera.name }}/delete" data-camera="{{ camera.name }}"
+        onsubmit="return confirm('Delete camera ' + this.dataset.camera + '? It is removed from config.yaml and stops recording. Its recordings, thumbnails, clips and events stay on disk.')">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    <button type="submit" class="contrast outline">Delete camera</button>
+  </form>
+</div>
 {% endif %}
 
 <div class="grid">

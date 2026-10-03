@@ -136,3 +136,42 @@ def test_values_are_never_logged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert messages, "expected one log line naming the keys"
     assert all("hunter2-secret" not in m for m in messages)
     assert any("CAM_FRONT_PASS" in m for m in messages)
+
+
+def test_remove_env_vars_drops_only_those_keys(tmp_path: Path) -> None:
+    from rtsp_warden.web.env_file import remove_env_vars
+
+    env = tmp_path / ".env"
+    env.write_text('# keep\nA="1"\nCAM_X_USER="u"\nB="2"\nCAM_X_PASS="p"\nCAM_X_USER="dup"\n')
+    env.chmod(0o644)
+
+    remove_env_vars(env, ["CAM_X_USER", "CAM_X_PASS"])
+
+    assert env.read_text() == '# keep\nA="1"\nB="2"\n'
+    assert _mode(env) == 0o600
+
+
+def test_remove_env_vars_is_a_no_op_without_file_or_keys(tmp_path: Path) -> None:
+    from rtsp_warden.web.env_file import remove_env_vars
+
+    env = tmp_path / ".env"
+    remove_env_vars(env, ["CAM_X_USER"])
+    assert not env.exists()
+    env.write_text('A="1"\n')
+    remove_env_vars(env, [])
+    remove_env_vars(env, ["NOT_THERE"])
+    assert env.read_text() == 'A="1"\n'
+
+
+def test_remove_env_vars_logs_key_names_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rtsp_warden.web.env_file import remove_env_vars
+
+    messages: list[str] = []
+    monkeypatch.setattr(env_file.log, "info", lambda msg, *args: messages.append(msg % args))
+    env = tmp_path / ".env"
+    env.write_text('CAM_X_PASS="hunter2-secret"\n')
+    remove_env_vars(env, ["CAM_X_PASS"])
+    assert messages and all("hunter2-secret" not in m for m in messages)
+    assert any("CAM_X_PASS" in m for m in messages)
