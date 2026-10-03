@@ -129,3 +129,90 @@
 .status-dot.status-restarting { background: #b26a00; }
 .status-dot.status-failed { background: #c62828; }
 .camera-error { color: #c62828; word-break: break-word; }
+
+/* --- detection (RW-3) --- */
+
+/* Event cards (Task 13): events grid and dashboard strip */
+.event-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.event-card {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.event-card-thumb {
+  display: block;
+}
+.event-thumb,
+.event-thumb-placeholder {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #111;
+}
+.event-thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pico-muted-border-color, #ddd);
+  color: var(--pico-muted-color, #777);
+  font-size: 0.875rem;
+}
+.event-thumb[hidden],
+.event-thumb-placeholder[hidden],
+.event-detail-thumb[hidden] {
+  display: none;
+}
+.event-card-body {
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+.event-card-title {
+  margin: 0 0 0.25rem;
+}
+.event-label {
+  font-weight: 600;
+  text-decoration: none;
+}
+.event-confidence {
+  margin-left: 0.4rem;
+  color: var(--pico-muted-color, #777);
+}
+.event-meta {
+  display: block;
+  color: var(--pico-muted-color, #777);
+  overflow-wrap: anywhere;
+}
+.event-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  background: #6a1b9a;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.event-detail-thumb {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.event-clip {
+  display: block;
+  width: 100%;
+  max-height: 600px;
+  background: #000;
+}
+.action-ok {
+  color: #2e7d32;
+}
+.action-failed {
+  color: #c62828;
+}

@@ -178,10 +178,11 @@ class TestDashboard:
         assert "back" in r.text
 
     def test_dashboard_shows_no_events(self, client_with_config: TestClient) -> None:
-        """Dashboard should show no-events message when DB is empty."""
+        """Dashboard should show the no-events message and no event cards when DB is empty."""
         r = client_with_config.get("/")
         assert r.status_code == 200
-        assert "No events" in r.text or "events" in r.text.lower()
+        assert "No events yet." in r.text
+        assert 'class="event-card"' not in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -238,15 +239,21 @@ class TestEvents:
     """Tests for the events routes."""
 
     def test_events_list_renders_empty(self, client_with_config: TestClient) -> None:
-        """GET /events should render empty list."""
+        """GET /events should render the empty grid and the camera filter options."""
         r = client_with_config.get("/events")
         assert r.status_code == 200
-        assert "No events" in r.text or "events" in r.text.lower()
+        assert "No events found." in r.text
+        assert '<option value="front">front</option>' in r.text
+        assert '<option value="back">back</option>' in r.text
 
     def test_events_list_with_filter(self, client_with_config: TestClient) -> None:
-        """GET /events?severity=warn should accept filter params."""
-        r = client_with_config.get("/events?severity=warn")
+        """GET /events accepts the camera, label and date filters."""
+        r = client_with_config.get(
+            "/events?camera=front&label=person&from=2026-10-01&to=2026-10-02"
+        )
         assert r.status_code == 200
+        assert "No events found." in r.text
+        assert "matching the filters" in r.text
 
     def test_event_detail_404(self, client_with_config: TestClient) -> None:
         """GET /events/99999 should return 404 for non-existent event."""
@@ -254,9 +261,11 @@ class TestEvents:
         assert r.status_code == 404
 
     def test_events_partial(self, client_with_config: TestClient) -> None:
-        """GET /events/partial should return event rows HTML."""
+        """GET /events/partial should return only the grid fragment."""
         r = client_with_config.get("/events/partial")
         assert r.status_code == 200
+        assert "No events found." in r.text
+        assert "<html" not in r.text
 
 
 # ---------------------------------------------------------------------------

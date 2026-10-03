@@ -3,29 +3,87 @@
 
 {% block content %}
 <hgroup>
-  <h1>Event {{ event.id }}</h1>
-  <p>{{ event.event_type }} &middot; {{ event.camera_name }}</p>
+  <h1>{{ event.label }}{% if event.confidence_pct is not none %} {{ event.confidence_pct }}%{% endif %}{% if event.is_test %} <span class="event-badge">test</span>{% endif %}</h1>
+  <p>{{ event.camera_name }}{% if event.zone %} &middot; {{ event.zone }}{% endif %} &middot; {{ event.started_display }}</p>
 </hgroup>
 
 <article>
+  {% if event.thumbnail_url %}
+  <img class="event-detail-thumb" src="{{ event.thumbnail_url }}" alt="{{ event.label }} on {{ event.camera_name }}"
+       onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+  <span class="event-thumb-placeholder" hidden>expired</span>
+  {% elif event.thumbnail_expired %}
+  <span class="event-thumb-placeholder">expired</span>
+  {% else %}
+  <span class="event-thumb-placeholder">no image</span>
+  {% endif %}
+</article>
+
+<article>
+  <header>Clip</header>
+  {% if event.clip_kind == 'mp4' %}
+  <video class="event-clip" controls preload="metadata" src="{{ event.clip_url }}"></video>
+  <p><a href="{{ event.clip_url }}" download="event-{{ event.id }}.mp4">Download clip</a></p>
+  {% elif event.clip_kind == 'ts' %}
+  {% with htl_src=event.clip_playlist_url %}{% include "partials/hls_player.html" %}{% endwith %}
+  <p><a href="{{ event.clip_url }}" download="event-{{ event.id }}.ts">Download clip</a></p>
+  {% elif event.clip_expired %}
+  <p>Clip expired.</p>
+  {% else %}
+  <p><small>No clip for this event. A clip is cut when a rule with <code>clip: true</code> matches.</small></p>
+  {% endif %}
+</article>
+
+<article>
   <header>Details</header>
-  <table>
-    <tbody>
-      <tr><td>ID</td><td>{{ event.id }}</td></tr>
-      <tr><td>Camera</td><td>{{ event.camera_name }}</td></tr>
-      <tr><td>Type</td><td>{{ event.event_type }}</td></tr>
-      <tr><td>Severity</td><td><span class="severity-{{ event.severity }}">{{ event.severity }}</span></td></tr>
-      <tr><td>Message</td><td>{{ event.message or '-' }}</td></tr>
-      <tr><td>Time</td><td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '-' }}</td></tr>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th scope="row">Camera</th><td>{{ event.camera_name }}</td></tr>
+        <tr><th scope="row">Label</th><td>{{ event.label }}</td></tr>
+        <tr><th scope="row">Confidence</th><td>{% if event.confidence_pct is not none %}{{ event.confidence_pct }}%{% else %}-{% endif %}</td></tr>
+        <tr><th scope="row">Zone</th><td>{{ event.zone or '-' }}</td></tr>
+        <tr><th scope="row">Started</th><td>{{ event.started_display or '-' }}</td></tr>
+        <tr><th scope="row">Ended</th><td>{{ event.ended_display or '-' }}</td></tr>
+        <tr><th scope="row">Duration</th><td>{{ event.duration_display or '-' }}</td></tr>
+        <tr><th scope="row">Type</th><td>{{ event.event_type }}</td></tr>
+        {% if event.track_id is not none %}<tr><th scope="row">Track</th><td>{{ event.track_id }}</td></tr>{% endif %}
+        {% if event.message %}<tr><th scope="row">Message</th><td>{{ event.message }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</article>
+
+<article>
+  <header>Actions</header>
+  {% if action_runs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Action</th><th>Result</th><th>Time</th><th>Error</th></tr>
+      </thead>
+      <tbody>
+        {% for run in action_runs %}
+        <tr>
+          <td>{{ run.action_name }}</td>
+          <td><span class="action-{{ run.status }}">{{ run.status }}</span></td>
+          <td>{{ run.created_display }}</td>
+          <td>{{ run.error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p><small>No actions ran for this event.</small></p>
+  {% endif %}
 </article>
 
 {% if event.metadata_json and event.metadata_json != '{}' %}
-<article>
-  <header>Metadata</header>
+<details>
+  <summary>Raw metadata</summary>
   <pre><code>{{ event.metadata_json }}</code></pre>
-</article>
+</details>
 {% endif %}
 
 <p><a href="/events">&larr; Back to events</a></p>

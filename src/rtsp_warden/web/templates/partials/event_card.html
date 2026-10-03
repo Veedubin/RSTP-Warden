@@ -1,0 +1,24 @@
+{# One event card (events grid, dashboard strip). Context: evt = a dict from
+   rtsp_warden.web.services.events.event_to_dict(). #}
+<article class="event-card" id="event-card-{{ evt.id }}">
+  <a class="event-card-thumb" href="{{ evt.detail_url }}">
+    {% if evt.thumbnail_url %}
+    <img class="event-thumb" src="{{ evt.thumbnail_url }}" alt="{{ evt.label }} on {{ evt.camera_name }}" loading="lazy"
+         onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+    <span class="event-thumb-placeholder" hidden>expired</span>
+    {% elif evt.thumbnail_expired %}
+    <span class="event-thumb-placeholder">expired</span>
+    {% else %}
+    <span class="event-thumb-placeholder">no image</span>
+    {% endif %}
+  </a>
+  <div class="event-card-body">
+    <p class="event-card-title">
+      <a class="event-label" href="{{ evt.detail_url }}">{{ evt.label }}</a>
+      {% if evt.confidence_pct is not none %}<span class="event-confidence">{{ evt.confidence_pct }}%</span>{% endif %}
+      {% if evt.is_test %}<span class="event-badge">test</span>{% endif %}
+    </p>
+    <small class="event-meta">{{ evt.camera_name }}{% if evt.zone %} &middot; {{ evt.zone }}{% endif %}</small>
+    <small class="event-meta"><time datetime="{{ evt.started_iso }}">{{ evt.started_display }}</time></small>
+  </div>
+</article>

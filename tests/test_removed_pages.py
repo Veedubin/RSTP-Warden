@@ -65,7 +65,8 @@ def test_manual_clip_generation_route_is_gone(client: TestClient) -> None:
     _insert_event_row(7)
     token = client.cookies.get("warden_csrf", "")
     r = client.post("/events/7/clip", headers={"X-CSRF-Token": token}, follow_redirects=False)
-    assert r.status_code == 404
+    # GET /events/{id}/clip serves a rule-made clip (Task 13); nothing accepts a POST there.
+    assert r.status_code == 405
 
 
 def test_nav_and_dashboard_have_no_recordings(client: TestClient) -> None:

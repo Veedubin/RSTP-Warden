@@ -62,21 +62,12 @@
 {# Recent events #}
 <h2>Recent events</h2>
 {% if recent_events %}
-<table>
-  <thead>
-    <tr><th>Time</th><th>Camera</th><th>Type</th><th>Severity</th></tr>
-  </thead>
-  <tbody>
-    {% for evt in recent_events %}
-    <tr>
-      <td>{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</td>
-      <td>{{ evt.camera_name }}</td>
-      <td>{{ evt.event_type }}</td>
-      <td><span class="severity-{{ evt.severity }}">{{ evt.severity }}</span></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="event-grid">
+  {% for evt in recent_events[:6] %}
+  {% include "partials/event_card.html" %}
+  {% endfor %}
+</div>
+<p><a href="/events">All events &rarr;</a></p>
 {% else %}
 <p><small>No events yet.</small></p>
 {% endif %}

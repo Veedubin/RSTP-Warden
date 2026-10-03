@@ -1,0 +1,12 @@
+{# The event card grid. events/list.html includes it inside #event-grid and
+   GET /events/partial returns it alone (the htmx refresh swaps innerHTML).
+   Context: events (list of event dicts). #}
+{% if events %}
+<div class="event-grid">
+  {% for evt in events %}
+  {% include "partials/event_card.html" %}
+  {% endfor %}
+</div>
+{% else %}
+<p><small>No events found.</small></p>
+{% endif %}
