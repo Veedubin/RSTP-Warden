@@ -18,8 +18,9 @@ fi
 # 2. Create directories
 echo "==> Creating directories..."
 
-install -d -m 0755 -o root -g "${SERVICE_GROUP}" /etc/rtsp-warden
-echo "    /etc/rtsp-warden  (mode 755, root:${SERVICE_GROUP})"
+# Group-writable: the service saves config.yaml and .env here from the web UI.
+install -d -m 0770 -o root -g "${SERVICE_GROUP}" /etc/rtsp-warden
+echo "    /etc/rtsp-warden  (mode 770, root:${SERVICE_GROUP})"
 
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /var/lib/rtsp-warden
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" /var/lib/rtsp-warden/recordings

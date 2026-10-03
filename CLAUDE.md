@@ -39,7 +39,8 @@ uv run rtsp-warden doctor -c config.yaml
 uv run rtsp-warden serve -c config.yaml --web --web-port 8080
 ```
 
-`serve`, `doctor` and `status` load `.env` from the current working directory. `serve` runs `ensure_schema()`
+`serve`, `doctor` and `status` load `.env` from the directory that holds the config file, then
+from the current working directory (variables already set win). `serve` runs `ensure_schema()`
 and creates the first admin user when the users table is empty (`db/bootstrap.py`),
 so `install` is optional. `config.yaml` strings may reference `${ENV_VAR}`; a missing
 variable is a startup error. The `run` alias and the stdlib `ui` grid were removed.
@@ -54,7 +55,10 @@ and the version assertion in `tests/test_admin.py`.
 **Docker.** `docker compose up -d` builds `Dockerfile.distroless` (default, no shell).
 `Dockerfile` is the slim debuggable variant. Both run
 `rtsp-warden serve -c /app/config/config.yaml --web --web-port 8080`; the bind host comes
-from `WARDEN_WEB_HOST` (compose sets `0.0.0.0`; the default is `127.0.0.1`).
+from `WARDEN_WEB_HOST` (compose sets `0.0.0.0`; the default is `127.0.0.1`). Compose mounts
+`./config` read-write and the systemd unit lists `/etc/rtsp-warden` in `ReadWritePaths`,
+because the web UI saves `config.yaml` and `.env` there; the host directory must be writable
+by the container user (uid 65532 distroless, 1000 slim). `tests/test_deploy_writable.py` pins this.
 
 ## Architecture
 
@@ -113,7 +117,16 @@ so the app also works with no config (tests, `--no-web` paths).
 **Wiring.** `cli.serve` passes `config_path` and `runtime` into `WebUIServer`, which
 hands them to `create_app`, which sets `app.state.config_path` and `app.state.runtime`.
 Tests pass them to `create_app` directly. Shared route helpers (`get_cfg`,
-`get_config_path`, `find_camera`, `templates`) live in `web/routes/_common.py`.
+`get_config_path`, `find_camera`, `set_flash`, `is_htmx`) live in `web/routes/_common.py`,
+together with `templates`, the one `Jinja2Templates` instance route modules render with (a new
+route module never builds another; `tests/test_ui_shell.py` pins it). `camera_edit.router` is
+included before `cameras.router` so `/cameras/new` is not matched as `/cameras/{name}`.
+
+**Flash messages.** `set_flash(response, message, level)` (`info`, `success` or `error`)
+stores a one-shot message in the `warden_flash` cookie; `ContextMiddleware` exposes it as
+`request.state.flash` on the next full-page GET and deletes the cookie, and `base.html` renders
+it through `partials/flash.html`. Pair it with a 303 redirect after a plain form POST; an htmx
+request gets its message inside the returned fragment instead.
 
 **CSRF.** `CSRFMiddleware` accepts the token from the `X-CSRF-Token` header, the
 `csrf_token` query parameter, or a `csrf_token` form field. `static/js/warden.js` adds
@@ -127,9 +140,32 @@ running / restarting / failed / idle from the `CameraRuntime` (the supervisor st
 `next_restart_at` and `last_error` on it). The preview is served same-origin from the
 in-process `FrameHub` at `/cameras/{name}/live.mjpeg` and `/snapshot.jpg`
 (`web/services/preview.py`); nothing links to the 127.0.0.1 MJPEG side-server anymore.
+Every camera card comes from `partials/camera_card.html` (camera list, dashboard and the
+`/cameras/{name}/status` poll); `last_error` passes through `ffmpeg.redact_text`, so ffmpeg
+stderr that carries a URL with credentials never reaches a page. `/status.json` and `/health`
+need no login, so `web/routes/health.py` runs every status string through `redact_text` too.
 
 Config write-back uses `web/config_lock.py` (`flock` + temp file + `os.replace`).
 `config.yaml` is authoritative; the DB never stores camera config.
+
+**Camera add, edit and delete** (`web/routes/camera_edit.py`) never write the in-memory,
+env-expanded `CameraConfig` back to disk: they patch the raw YAML entry through
+`web/services/camera_config.py` (`append_camera`, `patch_camera`, `remove_camera`). Every
+config.yaml read-modify-write in the process must go through
+`camera_config.update_raw_config(path, mutate)`, which holds one lock from the read to the
+write (`_locked_write_yaml` alone locks only the write). Credentials are stored as
+`${CAM_<SLUG>_USER}` / `${CAM_<SLUG>_PASS}` references (`env_slug`: upper-case, `-` to `_`);
+the percent-encoded values go to `<config dir>/.env` through `web/env_file.upsert_env_vars`
+(mode 0600, locked) and into `os.environ`; delete drops them again when nothing references
+them. The running camera changes through `AppRuntime.request_add_camera` /
+`request_restart_camera` / `request_remove_camera`, which the supervisor applies on the main
+thread: add and edit are plain `def` routes that wait with `.result(timeout=30)` in the
+threadpool; delete is `async def` (ONVIF subscribers live on the event loop) and awaits
+`asyncio.shield(asyncio.wrap_future(fut))`, because a bare `wait_for` timeout would cancel a
+still-queued request. A timeout reports "still restarting", never a failure. "Test main
+stream" is `probe.probe_stream` (ffprobe plus one ffmpeg snapshot through `subprocess.run`)
+and "Find stream URLs (ONVIF)" is `onvif/media.discover_stream_uris`. A failed write
+(`OSError`) becomes an error message naming the path, never a 500.
 
 Auth is split in two: `auth.py` is WSGI-environ based (bcrypt users, `sessions`
 table, `wdt_`-prefixed API tokens, `Warden-Bearer` header) and `web/auth_bridge.py`
@@ -160,7 +196,14 @@ notifiers in `__init__`; it is used by the `/alerts` admin routes (list, edit, a
 sub-project 3 in `docs/superpowers/specs/2026-10-02-detection-and-automation-design.md`.
 
 ONVIF PTZ and events use handcrafted SOAP over `httpx` (`onvif/ptz.py`,
-`onvif/events.py`); there is no `zeep` dependency. Event
+`onvif/events.py`; envelope, WS-UsernameToken and fault helpers in `onvif/soap.py`); there is
+no `zeep` dependency. PTZ and events reach
+`http://<main_url host>:<camera.onvif_port or 80>/onvif/device_service` with the global
+`onvif:` credentials over HTTP Digest; WS-UsernameToken is used only by
+`onvif/media.discover_stream_uris` (ports 80, 8080, 888, 2020) for the add-camera form. The
+ONVIF page posts forms and swaps server-rendered fragments; tests patch the
+`routes.onvif._ptz_client` / `_event_client` factories. Preset saves patch the raw YAML entry
+under the lock, so `${VAR}` text survives. Event
 subscriptions are asyncio tasks on the uvicorn loop held in a module-level registry.
 They are not persisted and do not survive a restart.
 

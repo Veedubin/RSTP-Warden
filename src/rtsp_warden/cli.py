@@ -26,10 +26,22 @@ app = typer.Typer(add_completion=False, help="rtsp-warden: record RTSP streams +
 console = Console()
 
 
-SAMPLE_CONFIG_YAML = """cameras:
+SAMPLE_CONFIG_YAML = """# rtsp-warden starter config, written by `rtsp-warden init-config`.
+#
+# Camera logins are not stored in this file. ${CAM_USER} and ${CAM_PASS} are read from
+# the environment, or from a .env file next to this config.yaml (a .env in the
+# directory you start rtsp-warden from works too). Example .env:
+#   CAM_USER=admin
+#   CAM_PASS=your-camera-password
+# Percent-encode @ : / ? # % in those values (p@ss becomes p%40ss).
+# Cameras added from the web UI get their own CAM_<NAME>_USER / CAM_<NAME>_PASS
+# variables, written to that same .env file.
+cameras:
   - name: front
-    main_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/101
-    sub_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/102
+    main_url: rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.50:554/Streaming/Channels/101
+    # sub_url is optional. Without it, live view and detection use main_url and only
+    # the main stream is recorded.
+    # sub_url: rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.50:554/Streaming/Channels/102
 
     record:
       enabled: true
@@ -42,7 +54,7 @@ SAMPLE_CONFIG_YAML = """cameras:
         chunk_seconds: 300
         rtsp_transport: tcp
 
-      # Sub stream: TS container (NVR-grade default)
+      # Sub stream: recorded only when sub_url is set
       sub:
         enabled: true
         container: ts
@@ -58,7 +70,7 @@ SAMPLE_CONFIG_YAML = """cameras:
     proxy:
       enabled: true
       mode: mjpeg         # mjpeg | rtsp
-      stream: sub         # main | sub
+      stream: sub         # main | sub (falls back to main while sub_url is not set)
       bind_host: 0.0.0.0
       port: 9001
 
