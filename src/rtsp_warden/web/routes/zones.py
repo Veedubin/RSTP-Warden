@@ -7,16 +7,21 @@ and hot-reload detectors after zone changes.
 
 from __future__ import annotations
 
+import html
 import logging
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
-from ...config import AppConfig, GridZoneConfig
+from ...config import AppConfig, GridZoneConfig, validate_camera_zones
 from ..auth_depends import CurrentUser, require_admin
 from ..config_lock import _locked_write_yaml
+from ..services.detection import write_failed_message
 from ._common import find_camera, get_cfg, get_config_path, templates
 
 log = logging.getLogger(__name__)
@@ -115,16 +120,23 @@ async def save_zone(
     request: Request,
     name: str,
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Save a zone configuration (admin-only).
 
     Form fields:
-        zone_name: Human-readable zone label (required).
+        zone_name: Human-readable zone label (required; at most 64 characters, no "/").
+        kind: "ignore" or "area". When absent, an existing zone keeps its kind and a
+            new zone is an ignore zone (the editor gains the kind control with the
+            RW-2 UI pass; until then its saves send no kind).
         grid_cols: Grid columns, 2-64 (required).
         grid_rows: Grid rows, 2-64 (required).
         frame_width: Camera frame width in pixels (required).
         frame_height: Camera frame height in pixels (required).
         blocked_cell: Zero or more "col,row" strings marking blocked cells.
+
+    A change that a rule's ``zones`` list would no longer accept (turning a
+    rule's area into an ignore zone) is refused with 422 and nothing is written.
+    A config.yaml that cannot be written is reported with its path (R9).
 
     On success, redirects to /cameras/{name}/zones.
     """
@@ -140,6 +152,16 @@ async def save_zone(
     if not zone_name_raw or not str(zone_name_raw).strip():
         raise HTTPException(status_code=422, detail="zone_name is required")
     zone_name = str(zone_name_raw).strip()
+
+    kind_field = form.get("kind")
+    if kind_field is None or not str(kind_field).strip():
+        existing = next((z for z in cam.zones if z.name == zone_name), None)
+        kind_raw = existing.kind if existing is not None else "ignore"
+    else:
+        kind_raw = str(kind_field).strip()
+    if kind_raw not in ("ignore", "area"):
+        raise HTTPException(status_code=422, detail="kind must be 'ignore' or 'area'")
+    kind: Literal["ignore", "area"] = "area" if kind_raw == "area" else "ignore"
 
     try:
         grid_cols = int(form.get("grid_cols", 16))
@@ -183,15 +205,20 @@ async def save_zone(
             )
         blocked_cells.add((col, row))
 
-    # Build the new zone config
-    new_zone = GridZoneConfig(
-        name=zone_name,
-        grid_cols=grid_cols,
-        grid_rows=grid_rows,
-        blocked_cells=blocked_cells,
-        frame_width=frame_width,
-        frame_height=frame_height,
-    )
+    # Build the new zone config (the model enforces the zone-name rules)
+    try:
+        new_zone = GridZoneConfig(
+            name=zone_name,
+            kind=kind,
+            grid_cols=grid_cols,
+            grid_rows=grid_rows,
+            blocked_cells=blocked_cells,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+    except ValidationError as exc:
+        detail = "; ".join(str(err["msg"]) for err in exc.errors())
+        raise HTTPException(status_code=422, detail=detail) from exc
 
     # Update camera's zones list: replace existing zone by name, or append
     replaced = False
@@ -205,12 +232,22 @@ async def save_zone(
     if not replaced:
         updated_zones.append(new_zone)
 
+    # Rules name area zones; refuse a change that would make config.yaml fail to load.
+    try:
+        validate_camera_zones(updated_zones, cam.rules)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     cam.zones = updated_zones
 
     # Persist to config.yaml
     config_path = get_config_path(request)
     if config_path is not None:
-        _persist_zones(config_path, cfg)
+        try:
+            _persist_zones(config_path, cfg)
+        except OSError as exc:
+            log.warning("camera %s: zone %r not saved: %s", name, zone_name, exc)
+            return _write_failed(request, name, write_failed_message(config_path, exc))
 
     return RedirectResponse(url=f"/cameras/{name}/zones", status_code=303)
 
@@ -221,8 +258,11 @@ async def delete_zone(
     name: str,
     zone_name: str,
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Delete a zone from a camera (admin-only).
+
+    A zone that a rule names is not deleted (422): config.yaml would fail to load.
+    A config.yaml that cannot be written is reported with its path (R9).
 
     On success, redirects to /cameras/{name}/zones.
     """
@@ -231,14 +271,37 @@ async def delete_zone(
     if cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
-    cam.zones = [z for z in cam.zones if z.name != zone_name]
+    remaining = [z for z in cam.zones if z.name != zone_name]
+    try:
+        validate_camera_zones(remaining, cam.rules)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    cam.zones = remaining
 
     # Persist to config.yaml
     config_path = get_config_path(request)
     if config_path is not None:
-        _persist_zones(config_path, cfg)
+        try:
+            _persist_zones(config_path, cfg)
+        except OSError as exc:
+            log.warning("camera %s: zone %r not deleted on disk: %s", name, zone_name, exc)
+            return _write_failed(request, name, write_failed_message(config_path, exc))
 
     return RedirectResponse(url=f"/cameras/{name}/zones", status_code=303)
+
+
+def _write_failed(request: Request, name: str, message: str) -> HTMLResponse:
+    """Report a config.yaml write failure (R9) instead of a 500.
+
+    htmx only swaps 2xx answers, so an htmx request gets the message as 200; a plain
+    form post gets 503.
+    """
+    body = (
+        f'<article role="alert"><p>{html.escape(message)}</p>'
+        f'<p><a href="/cameras/{html.escape(name)}/zones">Back to zones</a></p></article>'
+    )
+    status = 200 if request.headers.get("HX-Request") == "true" else 503
+    return HTMLResponse(body, status_code=status)
 
 
 @router.post("/{name}/zones/reload")
@@ -267,7 +330,9 @@ async def reload_zones(
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
     try:
-        app_rt.rebuild_camera_detectors(name)
+        # Off the event loop: a rebuild sets up the new detectors (an ONNX session load)
+        # and tears the old runner down (joins its worker).
+        await run_in_threadpool(app_rt.rebuild_camera_detectors, name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -308,6 +373,7 @@ def _zone_to_dict(zone: GridZoneConfig) -> dict:
     """
     return {
         "name": zone.name,
+        "kind": zone.kind,
         "grid_cols": zone.grid_cols,
         "grid_rows": zone.grid_rows,
         "blocked_cells": [[c, r] for c, r in sorted(zone.blocked_cells)],

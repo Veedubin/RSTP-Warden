@@ -182,9 +182,11 @@ class DetectorRunner:
         # Filter detections by ROI (discard those outside)
         all_detections = filter_by_roi(all_detections, self.roi)
 
-        # Filter detections by grid masks (discard those in blocked cells)
+        # Filter detections by ignore zones (discard those in blocked cells). Cells are
+        # fractions of the frame the boxes came from, not of the zone's saved size.
+        frame_h, frame_w = frame.shape[:2]
         for gm in self.grid_masks:
-            all_detections = gm.filter_detections(all_detections)
+            all_detections = gm.filter_detections(all_detections, frame_w, frame_h)
 
         self._frames_processed += 1
         self._detections_total += len(all_detections)

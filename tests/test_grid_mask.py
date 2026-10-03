@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from rtsp_warden.detectors.base import Detection
-from rtsp_warden.detectors.grid_mask import GridMask
+from rtsp_warden.detectors.grid_mask import GridMask, zone_for_point
 
 # ---------------------------------------------------------------------------
 # Construction and validation
@@ -283,3 +283,102 @@ def test_grid_mask_from_grid_zone_config() -> None:
     assert gm.is_cell_blocked(0, 0)
     assert gm.is_cell_blocked(1, 1)
     assert not gm.is_cell_blocked(2, 2)
+
+
+# ---------------------------------------------------------------------------
+# Runtime frame size, contains_point, from_zone, zone_for_point (RW-3 Task 8)
+# ---------------------------------------------------------------------------
+
+
+def _right_half_blocked() -> GridMask:
+    """16x16 zone saved at the editor default 1920x1080 with the right half blocked."""
+    return GridMask(
+        grid_cols=16,
+        grid_rows=16,
+        blocked_cells={(c, r) for c in range(8, 16) for r in range(16)},
+        frame_width=1920,
+        frame_height=1080,
+        name="right_half",
+    )
+
+
+def test_cell_for_point_divides_by_the_given_frame_size() -> None:
+    """A point in a 320x180 tap frame lands in the same fraction of the grid."""
+    gm = _right_half_blocked()
+    # (240, 90) is three quarters across and halfway down a 320x180 frame.
+    assert gm.cell_for_point(240, 90, 320, 180) == (12, 8)
+    # The same picture tapped at 640x360.
+    assert gm.cell_for_point(480, 180, 640, 360) == (12, 8)
+
+
+def test_cell_for_point_falls_back_to_the_saved_size() -> None:
+    """Without a frame size the zone's saved frame_width/frame_height are the divisor."""
+    gm = _right_half_blocked()
+    assert gm.cell_for_point(240, 90) == (2, 1)
+    assert gm.cell_for_point(1440, 540) == (12, 8)
+
+
+def test_cell_for_point_ignores_a_non_positive_frame_size() -> None:
+    """A zero frame size falls back to the saved size instead of dividing by zero."""
+    gm = GridMask(grid_cols=8, grid_rows=8, frame_width=800, frame_height=600)
+    assert gm.cell_for_point(400, 300, 0, 0) == (4, 4)
+
+
+def test_contains_point_is_true_only_in_active_cells() -> None:
+    """contains_point means "not in a blocked cell" of the given frame."""
+    gm = _right_half_blocked()
+    assert gm.contains_point(60, 90, 320, 180) is True
+    assert gm.contains_point(240, 90, 320, 180) is False
+
+
+def test_filter_detections_uses_the_frame_size_of_the_boxes() -> None:
+    """Boxes from a 320x180 frame are judged in that frame, not the 1920x1080 save size."""
+    gm = _right_half_blocked()
+    right = Detection(kind="person", confidence=0.9, bbox=(220, 70, 40, 40))  # centre (240, 90)
+    left = Detection(kind="person", confidence=0.9, bbox=(40, 70, 40, 40))  # centre (60, 90)
+    assert gm.filter_detections([right, left], 320, 180) == [left]
+
+
+def test_filter_detections_without_frame_size_keeps_the_saved_size() -> None:
+    """The one-argument call keeps its meaning: boxes in the zone's saved pixels."""
+    gm = _right_half_blocked()
+    right = Detection(kind="person", bbox=(1420, 520, 40, 40))  # centre (1440, 540)
+    assert gm.filter_detections([right]) == []
+
+
+def test_from_zone_copies_the_zone() -> None:
+    """GridMask.from_zone carries name, grid, cells (as a new set) and saved size."""
+    from rtsp_warden.config import GridZoneConfig
+
+    zone = GridZoneConfig(
+        name="yard",
+        kind="area",
+        grid_cols=8,
+        grid_rows=4,
+        blocked_cells={(0, 0), (7, 3)},
+        frame_width=1280,
+        frame_height=720,
+    )
+    gm = GridMask.from_zone(zone)
+    assert gm.name == "yard"
+    assert (gm.grid_cols, gm.grid_rows) == (8, 4)
+    assert gm.blocked_cells == {(0, 0), (7, 3)}
+    assert gm.blocked_cells is not zone.blocked_cells
+    assert (gm.frame_width, gm.frame_height) == (1280, 720)
+
+
+def test_zone_for_point_returns_the_first_area_in_order() -> None:
+    """Overlapping areas resolve by list (config) order."""
+    whole = GridMask(grid_cols=2, grid_rows=2, name="whole")
+    left = GridMask(grid_cols=2, grid_rows=2, blocked_cells={(1, 0), (1, 1)}, name="left")
+    areas = [("left", left), ("whole", whole)]
+    assert zone_for_point(areas, 10, 10, 320, 180) == "left"
+    assert zone_for_point(areas, 300, 10, 320, 180) == "whole"
+    assert zone_for_point(list(reversed(areas)), 10, 10, 320, 180) == "whole"
+
+
+def test_zone_for_point_is_empty_when_no_area_contains_the_point() -> None:
+    """No containing area (or no areas at all) gives the empty string."""
+    left = GridMask(grid_cols=2, grid_rows=2, blocked_cells={(1, 0), (1, 1)}, name="left")
+    assert zone_for_point([("left", left)], 300, 10, 320, 180) == ""
+    assert zone_for_point([], 10, 10, 320, 180) == ""

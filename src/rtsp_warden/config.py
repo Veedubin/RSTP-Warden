@@ -249,28 +249,50 @@ class PTZPresetConfig(BaseModel):
 class GridZoneConfig(BaseModel):
     """Grid-based detection zone for a camera.
 
-    Divides the frame into an NxM grid of cells. Detections whose
-    bounding-box center falls within a blocked cell are discarded;
-    cells NOT in blocked_cells are active (detections are kept).
+    Divides the frame into an NxM grid of cells; cells NOT in blocked_cells
+    are active. What the cells mean depends on ``kind``:
+
+    - ``ignore`` (default): detections whose bounding-box center falls within
+      a blocked cell are discarded; detections in active cells are kept.
+    - ``area``: nothing is discarded. The active cells form a named area; an
+      event's ``zone`` is the first area (config order) containing the center
+      of its best box, and ``rules[].zones`` refer to areas by name.
+
+    Cells are fractions of the frame, so a zone drawn on a full-size snapshot
+    applies unchanged to the smaller detection frame.
 
     Attributes:
-        name: Human-readable zone label, e.g. "exclude road".
+        name: Zone label, unique per camera, e.g. "exclude road" (1-64
+            characters after stripping, no "/").
+        kind: "ignore" or "area".
         grid_cols: Number of columns in the grid (2-64).
         grid_rows: Number of rows in the grid (2-64).
-        blocked_cells: Set of (col, row) tuples that block detections.
-            Cells NOT in this set are active.
+        blocked_cells: Set of (col, row) tuples. Cells NOT in this set are active.
         frame_width: Snapshot resolution width at time of save.
         frame_height: Snapshot resolution height at time of save.
         enabled: Whether this zone is active.
     """
 
     name: str
+    kind: Literal["ignore", "area"] = "ignore"
     grid_cols: int = 16
     grid_rows: int = 16
     blocked_cells: set[tuple[int, int]] = set()
     frame_width: int
     frame_height: int
     enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _zone_name(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("zone name must not be empty")
+        if len(v2) > 64:
+            raise ValueError("zone name must be at most 64 characters")
+        if "/" in v2:
+            raise ValueError("zone name must not contain '/'")
+        return v2
 
     @field_validator("grid_cols", "grid_rows")
     @classmethod
@@ -291,6 +313,35 @@ class GridZoneConfig(BaseModel):
                     f"{self.grid_cols}x{self.grid_rows} grid"
                 )
         return self
+
+
+def validate_camera_zones(zones: list[GridZoneConfig], rules: list[RuleConfig]) -> None:
+    """Check one camera's zones against each other and against its rules.
+
+    Zone names are unique per camera, and every name in ``rules[].zones`` is an
+    ``area`` zone of the same camera (enabled or not: a disabled area never
+    matches). Raises ValueError naming the zone (and rule) at fault. Used by
+    ``CameraConfig`` at load and by the zone routes before they write back.
+    """
+    seen: set[str] = set()
+    for zone in zones:
+        if zone.name in seen:
+            raise ValueError(f"zone name {zone.name!r} is used more than once")
+        seen.add(zone.name)
+    kinds = {zone.name: zone.kind for zone in zones}
+    areas = ", ".join(repr(zone.name) for zone in zones if zone.kind == "area") or "none"
+    for rule in rules:
+        for name in rule.zones:
+            if name not in kinds:
+                raise ValueError(
+                    f"rule {rule.name!r} names zone {name!r}, which is not a zone of "
+                    f"this camera (area zones: {areas})"
+                )
+            if kinds[name] != "area":
+                raise ValueError(
+                    f"rule {rule.name!r} names zone {name!r}, which is an ignore zone; "
+                    "rules can only name area zones"
+                )
 
 
 # --- Detection and automation (RW-3) ---
@@ -387,6 +438,9 @@ class RuleConfig(BaseModel):
 
 
 class CameraConfig(BaseModel):
+    # Errors name the camera and zone in their text; never echo the input (it holds URLs).
+    model_config = {"hide_input_in_errors": True}
+
     name: str
     main_url: str
     sub_url: str | None = None  # optional; every sub-stream consumer falls back to main
@@ -452,6 +506,15 @@ class CameraConfig(BaseModel):
         """Without a sub stream, the proxy (and frame tap) read the main stream."""
         if self.sub_url is None and self.proxy.stream == "sub":
             self.proxy.stream = "main"
+        return self
+
+    @model_validator(mode="after")
+    def _check_zones(self) -> CameraConfig:
+        """Zone names are unique per camera; rules[].zones name this camera's area zones."""
+        try:
+            validate_camera_zones(self.zones, self.rules)
+        except ValueError as exc:
+            raise ValueError(f"camera {self.name!r}: {exc}") from None
         return self
 
     @model_validator(mode="after")

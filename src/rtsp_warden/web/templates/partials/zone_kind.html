@@ -1,0 +1,16 @@
+{# Zone kind control (RW-3), for cameras/zones_editor.html inside its save form. The include
+   line ({% include "partials/zone_kind.html" %}) and the editor's zone_kind context value are
+   added when feat/detection is rebased onto the RW-2 UI pass (both live in RW-2's files).
+   Context: zone_kind is "ignore" or "area"; anything else, or missing, selects "ignore". #}
+<fieldset>
+  <legend>Zone kind</legend>
+  <label>
+    <input type="radio" name="kind" value="ignore"{% if zone_kind != "area" %} checked{% endif %}>
+    Ignore: detections centred in a black cell are dropped.
+  </label>
+  <label>
+    <input type="radio" name="kind" value="area"{% if zone_kind == "area" %} checked{% endif %}>
+    Named area: the green cells are the area. Nothing is dropped; events centred there
+    carry this zone's name, and rules can require it.
+  </label>
+</fieldset>

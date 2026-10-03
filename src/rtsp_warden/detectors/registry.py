@@ -332,13 +332,17 @@ class CameraDetectorBundle:
     """Aggregated result of building detectors for a camera.
 
     Contains the detector instances, masks, ROI, and grid masks
-    needed to create a DetectorRunner.
+    needed to create a DetectorRunner. ``grid_masks`` holds the camera's
+    enabled ``ignore`` zones (they filter detections); ``area_masks`` holds
+    its enabled ``area`` zones as ``(name, mask)`` in config order (they
+    name regions for events and rules and never filter).
     """
 
     detectors: list[Detector] = field(default_factory=list)
     masks: list[Mask] = field(default_factory=list)
     roi: ROI | None = None
     grid_masks: list[GridMask] = field(default_factory=list)
+    area_masks: list[tuple[str, GridMask]] = field(default_factory=list)
 
 
 def build_detector_with_sensitivity(
@@ -504,28 +508,30 @@ def build_detector_with_sensitivity(
 def build_grid_masks_from_config(
     zones: list[Any],  # list[GridZoneConfig]
 ) -> list[GridMask]:
-    """Build GridMask objects from camera zone config.
+    """Build the filtering GridMasks from camera zone config.
 
     Args:
         zones: List of GridZoneConfig objects from CameraConfig.zones.
 
     Returns:
-        List of GridMask objects (only enabled zones).
+        List of GridMask objects (enabled ``ignore`` zones only, config order).
     """
-    result: list[GridMask] = []
-    for zc in zones:
-        if not zc.enabled:
-            continue
-        gm = GridMask(
-            name=zc.name,
-            grid_cols=zc.grid_cols,
-            grid_rows=zc.grid_rows,
-            blocked_cells=set(zc.blocked_cells),
-            frame_width=zc.frame_width,
-            frame_height=zc.frame_height,
-        )
-        result.append(gm)
-    return result
+    return [GridMask.from_zone(zc) for zc in zones if zc.enabled and zc.kind == "ignore"]
+
+
+def build_area_masks_from_config(
+    zones: list[Any],  # list[GridZoneConfig]
+) -> list[tuple[str, GridMask]]:
+    """Build the named-area masks from camera zone config.
+
+    Args:
+        zones: List of GridZoneConfig objects from CameraConfig.zones.
+
+    Returns:
+        ``(zone name, GridMask)`` for each enabled ``area`` zone, in config order
+        (the order `zone_for_point` resolves overlaps by).
+    """
+    return [(zc.name, GridMask.from_zone(zc)) for zc in zones if zc.enabled and zc.kind == "area"]
 
 
 def build_detectors_for_camera(
@@ -587,14 +593,16 @@ def build_detectors_for_camera(
         if masks:
             runner_masks.extend(masks)
 
-    # Build grid masks from camera zones.
+    # Build grid masks from camera zones: ignore zones filter, area zones only name regions.
     grid_masks = build_grid_masks_from_config(camera_cfg.zones)
+    area_masks = build_area_masks_from_config(camera_cfg.zones)
 
     return CameraDetectorBundle(
         detectors=detectors,
         masks=runner_masks,
         roi=runner_roi,
         grid_masks=grid_masks,
+        area_masks=area_masks,
     )
 
 
@@ -604,6 +612,7 @@ __all__ = [
     "DetectorType",
     "build_detector",
     "build_detector_with_sensitivity",
+    "build_area_masks_from_config",
     "build_detectors_for_camera",
     "build_grid_masks_from_config",
     "build_masks",
