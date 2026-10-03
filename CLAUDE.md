@@ -74,9 +74,12 @@ FastAPI routes in `web/routes/health.py`.
 ingestor spawns a single multi-output ffmpeg built by `build_ffmpeg_ingest_cmd`
 (`ffmpeg.py`): segment recording (`.ts`, `-c copy`), MJPEG to stdout for the proxy
 `FrameHub`, RTSP publish to MediaMTX, and the **frame tap**: a low-res MJPEG stream to
-`pipe:3` (an `os.pipe` handed over via `pass_fds`). A reader thread splits the pipe on
-JPEG SOI/EOI markers and calls `FrameTapDispatcher.dispatch`. `mode: event` recording
-is a 1s polling thread on the `events` table that starts/stops the ingestors.
+`pipe:<fd>`, the write end of an `os.pipe` handed over via `pass_fds` (which keeps the
+parent's fd number; the parent closes its copy right after the spawn). Only the ingestor of
+`cam.proxy.stream` carries the tap. A reader thread owns the read end, splits it on JPEG
+SOI/EOI markers and calls the camera's own `FrameTapDispatcher` (`CameraRuntime.dispatcher`).
+`mode: event` recording is a 1s polling thread on the `events` table that starts/stops the
+ingestors.
 
 `.ts` is the deliberate container choice: MP4 segmenting failed on cameras with
 missing PPS / non-monotonic timestamps (see `docs/archive/CONTEXT_RTSP_WARDEN_DROP_MP4_USE_TS.md`).
@@ -86,7 +89,7 @@ in `ffmpeg.py` are env-only escape hatches, not config fields.
 ### Detector pipeline (`frame_tap.py` → `detectors/`)
 
 ```
-FrameTapDispatcher → DetectorRunner.on_frame (one runner per camera; bounded queue, drop-oldest, 2 workers)
+CameraRuntime.dispatcher → DetectorRunner.on_frame (one per camera; queue 8, drop-oldest, 1 worker)
   → cv2.imdecode → apply_masks (privacy polygons) → each Detector.process(frame_bgr, ts_unix)
   → filter_by_roi → GridMask.filter_detections → result sinks → EventSink → events table
 ```
@@ -100,8 +103,9 @@ applies camera-level `sensitivity` (`detectors/sensitivity.py`) and `detect_clas
 from `camera.zones`.
 
 Hot reload is `AppRuntime.rebuild_camera_detectors(name)`: rebuilds the bundle from
-the in-memory `CameraConfig`, swaps the runner under `_detector_lock`, and rewires the
-dispatcher's consumer tuple. Nothing else is restarted.
+the in-memory `CameraConfig`, sets the new runner up, swaps it under `_detector_lock` onto
+that camera's own dispatcher (followed by any `--frame-consumer` consumers), then tears the
+old runner down. Nothing else is restarted.
 
 ### Web layer (`web/`)
 

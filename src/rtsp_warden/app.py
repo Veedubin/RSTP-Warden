@@ -18,7 +18,7 @@ from .detectors.registry import build_detectors_for_camera
 from .detectors.runner import DetectorRunner
 from .detectors.sinks import EventSink
 from .ffmpeg import ExponentialBackoff
-from .frame_tap import FrameTapDispatcher
+from .frame_tap import FrameConsumer, FrameTapDispatcher
 from .proxy.mjpeg import FrameHub, MjpegProxyServer
 from .proxy.rtsp_mediamtx import MediaMTXProxyServer
 from .recorder import CameraRecorder
@@ -47,6 +47,10 @@ class CameraRuntime:
     proxy_restart_at: float = 0.0
     # Why the proxy last failed to start ('' once it runs), e.g. a taken MJPEG port.
     proxy_error: str = ""
+
+    # This camera's own frame tap fan-out: its detector runner, then any --frame-consumer
+    # consumers. It is created before the recorder, whose proxy-stream ingestor feeds it.
+    dispatcher: FrameTapDispatcher = field(default_factory=FrameTapDispatcher)
 
     def mark_healthy(self) -> None:
         """Clear restart state once every ingest process is running again."""
@@ -112,7 +116,8 @@ class AppRuntime:
     console: Console = field(default_factory=Console)
     stop: bool = False
     cameras: list[CameraRuntime] = field(default_factory=list)
-    frame_tap_dispatcher: FrameTapDispatcher | None = None
+    # --frame-consumer consumers: every camera's dispatcher gets each one after its runner.
+    frame_consumers: tuple[FrameConsumer, ...] = ()
     detectors_enabled: bool = True
     detector_runners: list[DetectorRunner] = field(default_factory=list)
     _event_sink: EventSink | None = field(default=None, init=False, repr=False)
@@ -123,12 +128,6 @@ class AppRuntime:
     _requests: queue.SimpleQueue[_RuntimeRequest] = field(
         default_factory=queue.SimpleQueue, init=False, repr=False
     )
-    # The dispatcher recorders are built with: the one passed in, never the one
-    # _build_detectors() creates later, so a rebuilt camera keeps its boot argv.
-    _ingest_dispatcher: FrameTapDispatcher | None = field(default=None, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self._ingest_dispatcher = self.frame_tap_dispatcher
 
     def build(self) -> None:
         self.cameras = [self._build_camera_runtime(cam) for cam in self.cfg.cameras]
@@ -153,11 +152,15 @@ class AppRuntime:
         else:
             hub = None
 
+        # The camera's own dispatcher exists before its recorder, so the proxy-stream ingestor
+        # captures it; _build_detectors / rebuild_camera_detectors attach the runner later.
+        dispatcher = FrameTapDispatcher(consumers=self.frame_consumers)
         recorder = CameraRecorder(
             camera=cam,
             runtime=self.cfg.runtime,
             proxy_hub=hub,
-            frame_tap_dispatcher=self._ingest_dispatcher,
+            frame_tap_dispatcher=dispatcher,
+            frame_tap_required=self._wants_frames(cam),
         )
 
         if cam.proxy.enabled:
@@ -197,7 +200,15 @@ class AppRuntime:
             retention=retention,
             rec_backoff=rec_backoff,
             proxy_backoff=proxy_backoff,
+            dispatcher=dispatcher,
         )
+
+    def _wants_frames(self, cam: CameraConfig) -> bool:
+        """True when something consumes this camera's tap: a --frame-consumer, or enabled
+        detectors (unless serve runs with --no-detectors)."""
+        if self.frame_consumers:
+            return True
+        return self.detectors_enabled and any(s.enabled for s in cam.detectors)
 
     def find_camera(self, name: str) -> CameraRuntime | None:
         """Return the CameraRuntime named *name*, or None. Safe to call from any thread."""
@@ -413,12 +424,7 @@ class AppRuntime:
                     except Exception:
                         log.warning("detector runner teardown failed", exc_info=True)
             self.detector_runners = [r for r in self.detector_runners if r.name != runner_name]
-            if self.frame_tap_dispatcher is not None:
-                self.frame_tap_dispatcher.consumers = tuple(
-                    c
-                    for c in self.frame_tap_dispatcher.consumers
-                    if getattr(c, "name", None) != runner_name
-                )
+            rt.dispatcher.consumers = ()
         self.cfg.cameras[:] = [c for c in self.cfg.cameras if c.name != name]
 
     def _apply_restart(self, name: str) -> None:
@@ -585,7 +591,10 @@ class AppRuntime:
         signal.signal(signal.SIGTERM, _handle)
 
     def _build_detectors(self) -> None:
-        """Build DetectorRunners for cameras that have detectors configured."""
+        """Build a DetectorRunner per camera with enabled detectors, on its own dispatcher.
+
+        Runners are only built here; start() sets them up.
+        """
         if not self.detectors_enabled:
             return
 
@@ -593,41 +602,50 @@ class AppRuntime:
         self._event_sink = EventSink()
 
         for cam_rt in self.cameras:
-            cam = cam_rt.camera
-            enabled_specs = [s for s in cam.detectors if s.enabled]
-            if not enabled_specs:
+            runner = self._make_runner(cam_rt.camera)
+            if runner is None:
                 continue
-
-            bundle = build_detectors_for_camera(cam, cam.detectors)
-            if not bundle.detectors:
-                continue
-
-            runner = DetectorRunner(
-                name=f"detector_{cam.name}",
-                detectors=tuple(bundle.detectors),
-                result_sinks=[self._event_sink],
-                masks=bundle.masks,
-                roi=bundle.roi,
-                grid_masks=bundle.grid_masks,
-            )
             self.detector_runners.append(runner)
+            self._set_consumers(cam_rt, runner)
 
-            # Wire into the frame tap dispatcher
-            if self.frame_tap_dispatcher is not None:
-                # Add the runner as a consumer
-                existing = list(self.frame_tap_dispatcher.consumers)
-                existing.append(runner)
-                self.frame_tap_dispatcher.consumers = tuple(existing)
-            else:
-                # Create a dispatcher just for detectors
-                self.frame_tap_dispatcher = FrameTapDispatcher(consumers=(runner,))
+    def _make_runner(self, cam: CameraConfig) -> DetectorRunner | None:
+        """Build (not set up) the camera's DetectorRunner; None when it has no detectors."""
+        if not self.detectors_enabled or not any(s.enabled for s in cam.detectors):
+            return None
+        bundle = build_detectors_for_camera(cam, cam.detectors)
+        if not bundle.detectors:
+            return None
+        if self._event_sink is None:
+            self._event_sink = EventSink()
+        # One worker keeps each camera's frames in order (MOG2 and the tracker are stateful);
+        # a short queue keeps drop-oldest meaning "freshest frame" when inference falls behind.
+        return DetectorRunner(
+            name=f"detector_{cam.name}",
+            detectors=tuple(bundle.detectors),
+            result_sinks=[self._event_sink],
+            queue_maxsize=8,
+            worker_count=1,
+            masks=bundle.masks,
+            roi=bundle.roi,
+            grid_masks=bundle.grid_masks,
+            camera=cam.name,
+        )
+
+    def _set_consumers(self, cam_rt: CameraRuntime, runner: DetectorRunner | None) -> None:
+        """Point the camera's dispatcher at its runner (if any), then the global consumers.
+
+        Assigning a new tuple is safe while the tap reader thread iterates the old one.
+        """
+        head: tuple[FrameConsumer, ...] = (runner,) if runner is not None else ()
+        cam_rt.dispatcher.consumers = (*head, *self.frame_consumers)
 
     def rebuild_camera_detectors(self, camera_name: str) -> None:
-        """Rebuild detectors for a single camera and atomically swap the runner.
+        """Rebuild one camera's detectors from its in-memory CameraConfig and swap the runner.
 
-        Reads the current camera config (in-memory), rebuilds the detector
-        runner for that camera, and swaps it into the active runtime under
-        a lock so no frames are dropped during the transition.
+        The new runner is set up first, then swapped into ``detector_runners`` and onto the
+        camera's own dispatcher under ``_detector_lock``, so the tap never feeds a stopped
+        runner; the old runner is torn down afterwards. Without enabled detectors the
+        dispatcher keeps only the --frame-consumer consumers. Nothing is restarted.
 
         Args:
             camera_name: Name of the camera whose detectors to rebuild.
@@ -635,84 +653,27 @@ class AppRuntime:
         Raises:
             ValueError: If the camera name is not found.
         """
-        # Find the CameraRuntime for this camera.
-        cam_rt = None
-        for rt in self.cameras:
-            if rt.camera.name == camera_name:
-                cam_rt = rt
-                break
+        cam_rt = self.find_camera(camera_name)
         if cam_rt is None:
             raise ValueError(f"camera {camera_name!r} not found")
 
-        cam = cam_rt.camera
-        enabled_specs = [s for s in cam.detectors if s.enabled]
-        if not enabled_specs:
-            # No detectors for this camera -- remove any existing runner.
-            with self._detector_lock:
-                old_runners = [
-                    r for r in self.detector_runners if r.name == f"detector_{camera_name}"
-                ]
-                for r in old_runners:
-                    r.teardown()
-                self.detector_runners = [
-                    r for r in self.detector_runners if r.name != f"detector_{camera_name}"
-                ]
-            return
-
-        bundle = build_detectors_for_camera(cam, cam.detectors)
-        if not bundle.detectors:
-            # No detectors built -- remove any existing runner.
-            with self._detector_lock:
-                old_runners = [
-                    r for r in self.detector_runners if r.name == f"detector_{camera_name}"
-                ]
-                for r in old_runners:
-                    r.teardown()
-                self.detector_runners = [
-                    r for r in self.detector_runners if r.name != f"detector_{camera_name}"
-                ]
-            return
-
-        if self._event_sink is None:
-            self._event_sink = EventSink()
-
-        new_runner = DetectorRunner(
-            name=f"detector_{cam.name}",
-            detectors=tuple(bundle.detectors),
-            result_sinks=[self._event_sink],
-            masks=bundle.masks,
-            roi=bundle.roi,
-            grid_masks=bundle.grid_masks,
-        )
-
-        # Start the new runner's workers before taking the lock, so it is not held while
-        # threads start.
-        new_runner.setup()
+        runner_name = f"detector_{camera_name}"
+        new_runner = self._make_runner(cam_rt.camera)
+        if new_runner is not None:
+            new_runner.setup()
 
         with self._detector_lock:
-            # Teardown old runners for this camera.
-            old_runners = [r for r in self.detector_runners if r.name == f"detector_{camera_name}"]
-            for r in old_runners:
+            old_runners = [r for r in self.detector_runners if r.name == runner_name]
+            self.detector_runners = [r for r in self.detector_runners if r.name != runner_name]
+            if new_runner is not None:
+                self.detector_runners.append(new_runner)
+            self._set_consumers(cam_rt, new_runner)
+
+        for r in old_runners:
+            try:
                 r.teardown()
-
-            # Remove old runners and add new one.
-            self.detector_runners = [
-                r for r in self.detector_runners if r.name != f"detector_{camera_name}"
-            ]
-            self.detector_runners.append(new_runner)
-
-            # Wire into the dispatcher under the same lock, so a concurrent rebuild or
-            # remove cannot lose a consumer (gap-2 G-5).
-            if self.frame_tap_dispatcher is not None:
-                existing = list(self.frame_tap_dispatcher.consumers)
-                # Remove old runner consumers for this camera.
-                existing = [
-                    c
-                    for c in existing
-                    if not hasattr(c, "name") or c.name != f"detector_{camera_name}"
-                ]
-                existing.append(new_runner)
-                self.frame_tap_dispatcher.consumers = tuple(existing)
+            except Exception:
+                log.warning("detector runner teardown failed for %s", camera_name, exc_info=True)
 
     def _status_table(self) -> None:
         table = Table(title="rtsp-warden status", show_lines=False)

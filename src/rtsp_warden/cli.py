@@ -16,7 +16,7 @@ from . import __version__
 from .app import AppRuntime
 from .config import AppConfig, load_config
 from .ffmpeg import which_or_raise
-from .frame_tap import FrameTapDispatcher
+from .frame_tap import FrameConsumer
 from .logging_utils import setup_logging
 from .status_model import redact_rtsp_url
 from .web.config import WebSettings
@@ -180,13 +180,9 @@ def _import_consumer(spec: str) -> Any:
         raise typer.BadParameter(f"cannot instantiate {spec!r} with no args: {e}") from e
 
 
-def _build_frame_tap_dispatcher(consumer_specs: list[str]) -> FrameTapDispatcher | None:
-    """Build a FrameTapDispatcher from consumer specs. Returns None if no specs."""
-    if not consumer_specs:
-        return None
-
-    consumers = [_import_consumer(s) for s in consumer_specs]
-    return FrameTapDispatcher(consumers=consumers)
+def _build_frame_consumers(consumer_specs: list[str]) -> tuple[FrameConsumer, ...]:
+    """Instantiate the --frame-consumer specs. Every camera's dispatcher gets each one."""
+    return tuple(_import_consumer(s) for s in consumer_specs)
 
 
 def _latest_file_info(dir_path: Path) -> tuple[float, str]:
@@ -519,9 +515,12 @@ def serve(
     # Only after the config is known good; an admin user is only useful with the web UI.
     bootstrap_database(create_admin=web)
 
-    # Build a single dispatcher and let the ingest layer feed it (no monkey-patching).
-    dispatcher = _build_frame_tap_dispatcher(frame_consumer)
-    rt = AppRuntime(cfg=cfg, frame_tap_dispatcher=dispatcher, detectors_enabled=detectors)
+    # Each camera gets its own frame tap dispatcher; --frame-consumer consumers join every one.
+    rt = AppRuntime(
+        cfg=cfg,
+        frame_consumers=_build_frame_consumers(frame_consumer),
+        detectors_enabled=detectors,
+    )
     rt.build()
 
     ws: WebUIServer | None = None

@@ -29,7 +29,6 @@ from rtsp_warden.config import (
     RuntimeConfig,
 )
 from rtsp_warden.ffmpeg import ExponentialBackoff
-from rtsp_warden.frame_tap import FrameTapDispatcher
 from rtsp_warden.proxy.mjpeg import FrameHub, MjpegProxyServer
 from rtsp_warden.proxy.rtsp_mediamtx import MediaMTXProxyServer
 from rtsp_warden.recorder import CameraRecorder
@@ -97,14 +96,9 @@ def _cam(
     )
 
 
-def _runtime(
-    cams: list[CameraConfig],
-    *,
-    dispatcher: FrameTapDispatcher | None = None,
-    auto_restart: bool = True,
-) -> AppRuntime:
+def _runtime(cams: list[CameraConfig], *, auto_restart: bool = True) -> AppRuntime:
     cfg = AppConfig(cameras=cams, runtime=RuntimeConfig(auto_restart=auto_restart))
-    return AppRuntime(cfg=cfg, console=Console(file=io.StringIO()), frame_tap_dispatcher=dispatcher)
+    return AppRuntime(cfg=cfg, console=Console(file=io.StringIO()))
 
 
 def _start(runtime: AppRuntime, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,15 +187,13 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
 
 def test_build_keeps_camera_order_and_field_values(tmp_path: Path) -> None:
     """build() yields the same CameraRuntime objects and order as before (review focus)."""
-    dispatcher = FrameTapDispatcher()
     motion = [DetectorSpec(type="motion")]
     runtime = _runtime(
         [
             _cam("a", tmp_path, proxy="mjpeg", record=True, detectors=motion),
             _cam("b", tmp_path, proxy="rtsp", port=8554),
             _cam("c", tmp_path),
-        ],
-        dispatcher=dispatcher,
+        ]
     )
     runtime.build()
 
@@ -216,7 +208,7 @@ def test_build_keeps_camera_order_and_field_values(tmp_path: Path) -> None:
         assert rt.rec_backoff.min_s == 1.0
         assert rt.rec_backoff.max_s == 60.0
         assert rt.rec_backoff.factor == 2.0
-        assert rt.recorder.frame_tap_dispatcher is dispatcher
+        assert rt.recorder.frame_tap_dispatcher is rt.dispatcher
 
     a, b, c = runtime.cameras
     assert isinstance(a.hub, FrameHub)
@@ -229,7 +221,9 @@ def test_build_keeps_camera_order_and_field_values(tmp_path: Path) -> None:
     assert b.hub is None and b.retention is None
     assert c.proxy is None and c.hub is None and c.retention is None
     assert [r.name for r in runtime.detector_runners] == ["detector_a"]
-    assert [getattr(x, "name", None) for x in dispatcher.consumers] == ["detector_a"]
+    assert [getattr(x, "name", None) for x in a.dispatcher.consumers] == ["detector_a"]
+    assert tuple(b.dispatcher.consumers) == ()
+    assert tuple(c.dispatcher.consumers) == ()
 
 
 def test_start_keeps_process_order(
@@ -622,16 +616,16 @@ def test_a_request_queued_during_a_drain_waits_for_the_next_tick(
 def test_request_remove_camera_stops_it_and_drops_its_detector_runner(
     tmp_path: Path, calls: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dispatcher = FrameTapDispatcher()
     motion = [DetectorSpec(type="motion")]
     runtime = _runtime(
         [
             _cam("a", tmp_path, detectors=motion),
             _cam("b", tmp_path, proxy="mjpeg", detectors=motion),
-        ],
-        dispatcher=dispatcher,
+        ]
     )
     runtime.build()
+    removed = runtime.find_camera("b")
+    assert removed is not None
     published_at_stop: list[bool] = []
     stub_stop = CameraRecorder.stop
 
@@ -650,7 +644,10 @@ def test_request_remove_camera_stops_it_and_drops_its_detector_runner(
     assert calls == [("rec.stop", "b"), ("mjpeg.stop", "b")]
     assert published_at_stop == [False]  # unpublished before it is stopped
     assert [r.name for r in runtime.detector_runners] == ["detector_a"]
-    assert [getattr(c, "name", None) for c in dispatcher.consumers] == ["detector_a"]
+    remaining = runtime.find_camera("a")
+    assert remaining is not None
+    assert [getattr(c, "name", None) for c in remaining.dispatcher.consumers] == ["detector_a"]
+    assert tuple(removed.dispatcher.consumers) == ()
 
 
 def test_request_restart_rebuilds_the_camera_and_keeps_its_hub(
@@ -734,13 +731,13 @@ def test_restart_uses_the_current_cfg_entry_and_starts_mediamtx_first(
 
 
 def test_restart_keeps_the_boot_tap_setting(tmp_path: Path, calls: list[tuple[str, str]]) -> None:
-    """A rebuilt camera keeps its boot frame tap: no new pipe:3 output, no new ingest."""
+    """A rebuilt camera gets the same frame tap as at boot, on its own new dispatcher."""
     motion = [DetectorSpec(type="motion")]
     runtime = _runtime([_cam("a", tmp_path, record=True, detectors=motion), _cam("b", tmp_path)])
     runtime.build()
-    assert runtime.frame_tap_dispatcher is not None  # created by _build_detectors
     boot_a, boot_b = runtime.cameras
-    assert boot_a.recorder.frame_tap_dispatcher is None
+    assert boot_a.recorder.main is not None and boot_a.recorder.main.frame_tap_enabled
+    assert boot_a.recorder.frame_tap_dispatcher is boot_a.dispatcher
     assert boot_b.recorder.main is None  # nothing reads b's stream at boot
     try:
         for name in ("a", "b"):
@@ -750,7 +747,10 @@ def test_restart_keeps_the_boot_tap_setting(tmp_path: Path, calls: list[tuple[st
 
         a, b = runtime.find_camera("a"), runtime.find_camera("b")
         assert a is not None and a is not boot_a
-        assert a.recorder.frame_tap_dispatcher is None
+        assert a.dispatcher is not boot_a.dispatcher
+        assert a.recorder.frame_tap_dispatcher is a.dispatcher
+        assert a.recorder.main is not None and a.recorder.main.frame_tap_enabled
+        assert [getattr(c, "name", None) for c in a.dispatcher.consumers] == ["detector_a"]
         assert b is not None and b is not boot_b
         assert b.recorder.main is None
     finally:
@@ -761,8 +761,7 @@ def test_hot_add_wires_a_detector_runner_only_when_detectors_are_enabled(
     tmp_path: Path, calls: list[tuple[str, str]]
 ) -> None:
     for enabled, expected in ((True, ["detector_x"]), (False, [])):
-        dispatcher = FrameTapDispatcher()
-        runtime = _runtime([], dispatcher=dispatcher)
+        runtime = _runtime([])
         runtime.detectors_enabled = enabled
         runtime.build()
         cam = _cam("x", tmp_path, detectors=[DetectorSpec(type="motion")])
@@ -771,7 +770,9 @@ def test_hot_add_wires_a_detector_runner_only_when_detectors_are_enabled(
             runtime._drain_requests()
             assert fut.result(timeout=0) is None
             assert [r.name for r in runtime.detector_runners] == expected
-            assert [getattr(c, "name", None) for c in dispatcher.consumers] == expected
+            added = runtime.find_camera("x")
+            assert added is not None
+            assert [getattr(c, "name", None) for c in added.dispatcher.consumers] == expected
         finally:
             runtime.stop_all()  # joins the runner's worker threads
 
@@ -1096,14 +1097,13 @@ def test_consumer_rebinds_hold_the_detector_lock(
     tmp_path: Path, calls: list[tuple[str, str]]
 ) -> None:
     """A web-thread rebuild and a main-thread remove cannot lose a consumer (gap-2 G-5)."""
+    runtime = _runtime([_cam("a", tmp_path, detectors=[DetectorSpec(type="motion")])])
+    runtime.build()  # wires the boot runners before any thread runs
+    rt = runtime.find_camera("a")
+    assert rt is not None
     dispatcher = _LockCheckingDispatcher()
-    runtime = _runtime(
-        [_cam("a", tmp_path, detectors=[DetectorSpec(type="motion")])],
-        dispatcher=dispatcher,  # type: ignore[arg-type]
-    )
     dispatcher.lock = runtime._detector_lock
-    runtime.build()
-    dispatcher.held.clear()  # build() wires the boot runners before any thread runs
+    rt.dispatcher = dispatcher  # type: ignore[assignment]
     try:
         runtime.rebuild_camera_detectors("a")  # what the detector routes call
         fut = runtime.request_remove_camera("a")

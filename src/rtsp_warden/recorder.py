@@ -71,10 +71,20 @@ class StreamIngestor:
     proc: ManagedProcess | None = None
     _mjpeg_thread: threading.Thread | None = None
 
-    # runtime state (new)
+    # Frame tap pipe. Both ends exist only inside start(): the parent closes its write end
+    # once ffmpeg holds a copy, and the reader thread owns (and closes) the read end.
     _frame_tap_read_fd: int | None = None
     _frame_tap_write_fd: int | None = None
     _frame_tap_thread: threading.Thread | None = None
+
+    @property
+    def frame_tap_write_fd(self) -> int | None:
+        """The parent's copy of the tap pipe's write end; None once ffmpeg was spawned."""
+        return self._frame_tap_write_fd
+
+    def _frame_tap_on(self) -> bool:
+        """A tap needs somebody to dispatch to; an unread pipe would fill up and stall ffmpeg."""
+        return self.frame_tap_enabled and self.frame_tap_dispatcher is not None
 
     def required(self) -> bool:
         """True if anything requires this stream."""
@@ -82,7 +92,7 @@ class StreamIngestor:
             self.record_cfg is not None
             or self.mjpeg_hub is not None
             or self.rtsp_publish_url
-            or self.frame_tap_enabled
+            or self._frame_tap_on()
         )
 
     def is_running(self) -> bool:
@@ -98,7 +108,7 @@ class StreamIngestor:
         record_enabled = self.record_cfg is not None and bool(self.record_cfg.enabled)
         mjpeg_enabled = self.mjpeg_hub is not None
         rtsp_publish_enabled = self.rtsp_publish_url is not None
-        frame_tap_on = self.frame_tap_enabled
+        frame_tap_on = self._frame_tap_on()
 
         out_pattern = ""
         chunk_seconds = 300
@@ -129,14 +139,15 @@ class StreamIngestor:
         if self.proxy_cfg is not None:
             rtsp_transport_out = "tcp"  # keep deterministic for local publish
 
-        # Frame tap: set up a dedicated pipe for the low-res MJPEG output.
+        # Frame tap: a dedicated pipe for the low-res MJPEG output. Popen's pass_fds hands the
+        # write end to ffmpeg under the SAME fd number, so the output must name that number.
         tap_pipe = ""
         pass_fds: tuple[int, ...] = ()
         if frame_tap_on:
             r_fd, w_fd = os.pipe()
             self._frame_tap_read_fd = r_fd
             self._frame_tap_write_fd = w_fd
-            tap_pipe = "pipe:3"
+            tap_pipe = f"pipe:{w_fd}"
             pass_fds = (w_fd,)
 
         cmd = build_ffmpeg_ingest_cmd(
@@ -169,12 +180,38 @@ class StreamIngestor:
             stderr_tail_lines=int(self.runtime.stderr_tail_lines),
             pass_fds=pass_fds,
         )
-        self.proc.start()
+        try:
+            self.proc.start()
+        except BaseException:
+            self._close_frame_tap_read_fd()
+            raise
+        finally:
+            # ffmpeg holds its own copy now (or never will). The parent's copy must go, or the
+            # reader never sees EOF when ffmpeg exits and leaks one fd per restart.
+            self._close_frame_tap_write_fd()
 
         if mjpeg_enabled:
             self._start_mjpeg_reader()
         if frame_tap_on:
             self._start_frame_tap_reader()
+
+    def _close_frame_tap_write_fd(self) -> None:
+        """Close the parent's tap write end once; the field is cleared before the close."""
+        fd, self._frame_tap_write_fd = self._frame_tap_write_fd, None
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    def _close_frame_tap_read_fd(self) -> None:
+        """Close a tap read end no reader thread took over; the field is cleared first."""
+        fd, self._frame_tap_read_fd = self._frame_tap_read_fd, None
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def _start_mjpeg_reader(self) -> None:
         if self.proc is None or self.proc.popen is None:
@@ -240,27 +277,26 @@ class StreamIngestor:
             log.warning(f"[mjpeg_reader] {self.camera_name}/{self.stream_name} error: {e!r}")
 
     def _start_frame_tap_reader(self) -> None:
-        if self._frame_tap_read_fd is None:
+        """Hand the tap read end to a new reader thread, which owns and closes it."""
+        dispatcher = self.frame_tap_dispatcher
+        if dispatcher is None:
+            self._close_frame_tap_read_fd()
             return
-        if self.frame_tap_dispatcher is None:
-            return
-        if self._frame_tap_thread and self._frame_tap_thread.is_alive():
+        r_fd, self._frame_tap_read_fd = self._frame_tap_read_fd, None
+        if r_fd is None:
             return
 
         t = threading.Thread(
             target=self._frame_tap_reader_loop,
+            args=(r_fd, dispatcher),
             name=f"frame-tap-reader:{self.camera_name}:{self.stream_name}",
             daemon=True,
         )
         self._frame_tap_thread = t
         t.start()
 
-    def _frame_tap_reader_loop(self) -> None:
-        """Read JPEG frames from the dedicated frame-tap pipe and dispatch to consumers."""
-        if self._frame_tap_read_fd is None or self.frame_tap_dispatcher is None:
-            return
-
-        r_fd = self._frame_tap_read_fd
+    def _frame_tap_reader_loop(self, r_fd: int, dispatcher: FrameTapDispatcher) -> None:
+        """Read JPEG frames from the tap pipe and dispatch them; closes r_fd at EOF."""
         buf = bytearray()
         SOI = b"\xff\xd8"
         EOI = b"\xff\xd9"
@@ -289,7 +325,7 @@ class StreamIngestor:
                     frame = bytes(buf[: e + 2])
                     del buf[: e + 2]
 
-                    self.frame_tap_dispatcher.dispatch(
+                    dispatcher.dispatch(
                         camera=self.camera_name,
                         stream=self.stream_name,
                         jpeg_bytes=frame,
@@ -297,16 +333,17 @@ class StreamIngestor:
                     )
         except Exception as e:  # pragma: no cover
             log.warning(f"[frame_tap_reader] {self.camera_name}/{self.stream_name} error: {e!r}")
+        finally:
+            try:
+                os.close(r_fd)
+            except OSError:
+                pass
 
     def stop(self) -> None:
-        # Clean up frame tap pipe first (close write end so reader loop exits).
-        if self._frame_tap_write_fd is not None:
-            try:
-                os.close(self._frame_tap_write_fd)
-            except Exception:
-                pass
-            self._frame_tap_write_fd = None
-        self._frame_tap_read_fd = None
+        # Normally both are None by now: start() closed the write end and the reader thread
+        # owns the read end. This covers a start() that never got that far.
+        self._close_frame_tap_write_fd()
+        self._close_frame_tap_read_fd()
 
         if self.proc:
             try:
@@ -320,7 +357,7 @@ class StreamIngestor:
             self._mjpeg_thread.join(timeout=1.0)
         self._mjpeg_thread = None
 
-        # Frame tap reader thread will exit once read end is closed.
+        # The tap reader sees EOF once ffmpeg has exited, closes its fd and returns.
         if self._frame_tap_thread and self._frame_tap_thread.is_alive():
             self._frame_tap_thread.join(timeout=1.0)
         self._frame_tap_thread = None
@@ -342,7 +379,11 @@ class CameraRecorder:
     camera: CameraConfig
     runtime: RuntimeConfig
     proxy_hub: FrameHub | None = None
+    # This camera's own dispatcher. The tap rides on the proxy stream's ingestor only.
     frame_tap_dispatcher: FrameTapDispatcher | None = None
+    # True when something consumes the tap (a detector runner or a --frame-consumer): the
+    # proxy stream is then ingested even when nothing records or proxies it.
+    frame_tap_required: bool = False
     # Frame tap (fps, width). None = compute_tap_settings(camera): detect_fps at 320 px.
     tap_settings: tuple[float, int] | None = None
 
@@ -388,12 +429,16 @@ class CameraRecorder:
                 # We always publish locally into MediaMTX.
                 publish_url = f"rtsp://127.0.0.1:{cam.proxy.port}/{cam.proxy.path}"
 
+        # The frame tap always comes from the stream that feeds the proxy (main when there is
+        # no sub stream; the config validator guarantees that stream exists), never both.
+        tap_here = self.frame_tap_dispatcher is not None and stream_name == cam.proxy.stream
+
         # If nothing needs this stream, do not create it.
         if (
             record_cfg is None
             and mjpeg_hub is None
             and publish_url is None
-            and self.frame_tap_dispatcher is None
+            and not (tap_here and self.frame_tap_required)
         ):
             return None
 
@@ -426,10 +471,10 @@ class CameraRecorder:
             proxy_cfg=cam.proxy if cam.proxy.enabled else None,
             mjpeg_hub=mjpeg_hub,
             rtsp_publish_url=publish_url,
-            frame_tap_enabled=self.frame_tap_dispatcher is not None,
+            frame_tap_enabled=tap_here,
             frame_tap_fps=tap_fps,
             frame_tap_scale_width=tap_width,
-            frame_tap_dispatcher=self.frame_tap_dispatcher,
+            frame_tap_dispatcher=self.frame_tap_dispatcher if tap_here else None,
             audio=cam.record.audio,
         )
 

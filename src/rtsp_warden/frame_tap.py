@@ -7,7 +7,9 @@ Design goals:
 - best-effort dispatch that never crashes ingest/proxy by default
 - stable API contract for later wiring (e.g., MJPEG path / frame hub)
 
-Wired into StreamIngestor (recorder.py) through the pipe:3 file descriptor; see CLAUDE.md.
+Each camera has its own dispatcher (``CameraRuntime.dispatcher`` in app.py). The camera's
+proxy-stream ``StreamIngestor`` (recorder.py) reads ffmpeg's tap output from an ``os.pipe``
+whose write end is handed to ffmpeg as ``pipe:<fd>`` and dispatches every JPEG here.
 """
 
 from __future__ import annotations

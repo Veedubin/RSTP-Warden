@@ -48,6 +48,9 @@ class DetectorRunner:
     roi: ROI | None = None
     grid_masks: list[GridMask] = field(default_factory=list)
     swallow_exceptions: bool = True
+    # When set, on_frame drops frames from any other camera / stream. None accepts all.
+    camera: str | None = None
+    stream: str | None = None
 
     def __post_init__(self) -> None:
         self._queue: queue.Queue[_FrameJob] = queue.Queue(maxsize=self.queue_maxsize)
@@ -97,7 +100,13 @@ class DetectorRunner:
         """Enqueue a frame for processing. Returns quickly; work happens in worker threads.
 
         On queue overflow, drops the oldest frame to keep the pipeline moving.
+        Frames for another camera or stream than ``self.camera`` / ``self.stream`` (when
+        set) are ignored, so a mis-wired dispatcher cannot feed this camera's detectors.
         """
+        if self.camera is not None and camera != self.camera:
+            return
+        if self.stream is not None and stream != self.stream:
+            return
         job = _FrameJob(camera=camera, stream=stream, jpeg_bytes=jpeg_bytes, ts_unix=ts_unix)
         try:
             self._queue.put_nowait(job)
