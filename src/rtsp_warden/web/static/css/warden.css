@@ -303,3 +303,16 @@ a.button.outline.secondary {
     width: 100%;
   }
 }
+
+/* --- row actions: buttons and small forms side by side in a table cell (RW-2 Task 2) --- */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+.row-actions form,
+.row-actions button,
+.row-actions [role="button"] {
+  margin: 0;
+}

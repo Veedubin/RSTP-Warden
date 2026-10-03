@@ -51,3 +51,8 @@ def find_camera(cfg: AppConfig, name: str) -> CameraConfig | None:
         if cam.name == name:
             return cam
     return None
+
+
+def is_htmx(request: Request) -> bool:
+    """Return True when htmx sent the request (it adds ``HX-Request: true``)."""
+    return request.headers.get("hx-request") == "true"

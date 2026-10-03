@@ -2,13 +2,19 @@
 
 Provides admin-only CRUD for users: list, create, reset password,
 delete, and toggle admin status.
+
+The create and reset-password pages are plain HTML forms because their
+response is a whole page. Toggle-admin and delete are htmx forms on the users
+list: an htmx request gets ``partials/users_table.html`` back (200, errors
+shown inside it), which the page swaps over ``#users-table``. Without htmx
+they redirect to ``/users`` (303) with a flash message, or fail with 400/404.
 """
 
 from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ... import auth
@@ -23,13 +29,34 @@ from ...db import (
 )
 from ..auth_depends import CurrentUser, require_admin
 from ..csrf import check_csrf_form
-from ._common import templates
+from ._common import is_htmx, set_flash, templates
 
 router = APIRouter(prefix="/users")
 
 # Valid username: 3-32 chars, alphanumeric + underscore
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
 _MIN_PASSWORD_LEN = 8
+
+
+def _users_table(
+    request: Request,
+    user: CurrentUser,
+    *,
+    notice: str | None = None,
+    error: str | None = None,
+) -> HTMLResponse:
+    """Render the users table partial that htmx swaps over ``#users-table``."""
+    return templates.TemplateResponse(
+        request,
+        "partials/users_table.html",
+        {
+            "request": request,
+            "users": list_users(),
+            "current_user_id": user.user_id,
+            "notice": notice,
+            "error": error,
+        },
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -193,20 +220,32 @@ async def delete_user_route(
     user_id: int,
     csrf_token: str = Form(""),
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Delete a user. Refuses to delete the logged-in admin."""
     if not check_csrf_form(request, csrf_token):
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid")
 
+    htmx = is_htmx(request)
+
     # Refuse to delete self
     if user_id == user.user_id:
-        raise HTTPException(status_code=400, detail="You cannot delete your own account.")
+        message = "You cannot delete your own account."
+        if htmx:
+            return _users_table(request, user, error=message)
+        raise HTTPException(status_code=400, detail=message)
 
-    success = delete_user(user_id)
-    if not success:
+    target = get_user_by_id(user_id)
+    if target is None or not delete_user(user_id):
+        if htmx:
+            return _users_table(request, user, error="User not found.")
         raise HTTPException(status_code=404, detail="User not found")
 
-    return RedirectResponse(url="/users", status_code=303)
+    message = f"User {target.username} deleted."
+    if htmx:
+        return _users_table(request, user, notice=message)
+    response = RedirectResponse(url="/users", status_code=303)
+    set_flash(response, message, "success")
+    return response
 
 
 @router.post("/{user_id}/toggle-admin")
@@ -215,20 +254,35 @@ async def toggle_admin_route(
     user_id: int,
     csrf_token: str = Form(""),
     user: CurrentUser = Depends(require_admin),
-) -> RedirectResponse:
+) -> Response:
     """Toggle a user's admin status. Refuses to demote self."""
     if not check_csrf_form(request, csrf_token):
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid")
 
+    htmx = is_htmx(request)
+
     # Refuse to demote self
     if user_id == user.user_id:
-        raise HTTPException(status_code=400, detail="You cannot change your own admin status.")
+        message = "You cannot change your own admin status."
+        if htmx:
+            return _users_table(request, user, error=message)
+        raise HTTPException(status_code=400, detail=message)
 
     target = get_user_by_id(user_id)
     if target is None:
+        if htmx:
+            return _users_table(request, user, error="User not found.")
         raise HTTPException(status_code=404, detail="User not found")
 
     new_admin = target.role != "admin"
     set_user_admin(user_id, new_admin)
 
-    return RedirectResponse(url="/users", status_code=303)
+    if new_admin:
+        message = f"{target.username} is now an admin."
+    else:
+        message = f"{target.username} is no longer an admin."
+    if htmx:
+        return _users_table(request, user, notice=message)
+    response = RedirectResponse(url="/users", status_code=303)
+    set_flash(response, message, "success")
+    return response
