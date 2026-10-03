@@ -2,116 +2,154 @@
 {% block title %}Camera: {{ camera.name }}{% endblock %}
 
 {% block content %}
-<hgroup>
-  <h1>{{ camera.name }}</h1>
-  <p>Camera detail</p>
-</hgroup>
-
-{# Live MJPEG embed #}
-{% if mjpeg_url %}
-<article x-data="{
-           boxes: false,
-           init() { try { this.boxes = localStorage.getItem('warden.preview.boxes') === '1' } catch (e) {} },
-           save() { try { localStorage.setItem('warden.preview.boxes', this.boxes ? '1' : '0') } catch (e) {} }
-         }">
-  <header class="preview-header">
-    <span>Live preview</span>
-    <label class="preview-boxes-toggle">
-      <input type="checkbox" role="switch" x-model="boxes" @change="save()">
-      Show boxes
-    </label>
-  </header>
-  <div class="mjpeg-container">
-    <img src="{{ mjpeg_url }}" alt="Live MJPEG stream for {{ camera.name }}"
-         data-plain-src="{{ mjpeg_url }}"
-         data-boxes-src="/cameras/{{ camera.name }}/live-boxes.mjpeg"
-         :src="boxes ? $el.dataset.boxesSrc : $el.dataset.plainSrc"
-         onerror="this.alt='Stream unavailable'; this.style.background='#f0f0f0';">
-  </div>
-  <footer>
-    <small>
-      MJPEG stream at <code>{{ mjpeg_url }}</code>
-      {% if snapshot_url %}
-      &middot; <a href="{{ snapshot_url }}" target="_blank">Snapshot</a>
-      {% endif %}
-    </small>
-  </footer>
-</article>
-{% elif camera.has_proxy and camera.proxy_mode != 'mjpeg' %}
-<article>
-  <header>Proxy</header>
-  <p>Proxy is enabled in <strong>{{ camera.proxy_mode }}</strong> mode on port {{ camera.proxy_port }}.</p>
-</article>
-{% else %}
-<article>
-  <header>No live preview</header>
-  <p>Proxy is not enabled for this camera.</p>
-</article>
+{% set title = camera.name %}
+{% set subtitle = "Live view, status and settings" %}
+{% include "partials/page_header.html" %}
+{% if is_admin %}
+<div class="page-actions" id="camera-actions">
+  <a href="/cameras/{{ camera.name }}/edit" role="button" class="secondary outline">Edit camera</a>
+  <form method="post" action="/cameras/{{ camera.name }}/delete" data-camera="{{ camera.name }}"
+        onsubmit="return confirm('Delete camera ' + this.dataset.camera + '? It is removed from config.yaml and stops recording. Its recordings, thumbnails, clips and events stay on disk.')">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    <button type="submit" class="contrast outline">Delete camera</button>
+  </form>
+</div>
 {% endif %}
 
-{# Camera config summary #}
-<article>
-  <header>Configuration</header>
-  <table>
-    <tbody>
-      <tr><td>Recording</td><td>{{ 'Enabled' if camera.record_enabled else 'Disabled' }}</td></tr>
-      <tr><td>Proxy</td><td>{{ 'Enabled' if camera.has_proxy else 'Disabled' }}{% if camera.has_proxy %} ({{ camera.proxy_mode }}, port {{ camera.proxy_port }}){% endif %}</td></tr>
-      <tr><td>Main URL</td><td><code>{{ camera.main_url_redacted }}</code></td></tr>
-      <tr><td>Sub URL</td><td><code>{{ camera.sub_url_redacted or "not configured (using main)" }}</code></td></tr>
-      <tr><td>Status</td><td>
-        <span class="status-label status-{{ camera.status }}">
-          {% if camera.status == 'restarting' %}restarting in {{ camera.restart_in }}s{% else %}{{ camera.status }}{% endif %}
-        </span>
-      </td></tr>
-      {% if camera.last_error and camera.status != 'running' %}
-      <tr><td>Last error</td><td><small class="camera-error">{{ camera.last_error }}</small></td></tr>
-      {% endif %}
-    </tbody>
-  </table>
-</article>
+<div class="grid">
+  {# Live preview #}
+  {% if mjpeg_url %}
+  <article x-data="{
+             boxes: false,
+             init() { try { this.boxes = localStorage.getItem('warden.preview.boxes') === '1' } catch (e) {} },
+             save() { try { localStorage.setItem('warden.preview.boxes', this.boxes ? '1' : '0') } catch (e) {} }
+           }">
+    <header class="preview-header">
+      <span>Live preview</span>
+      <label class="preview-boxes-toggle">
+        <input type="checkbox" role="switch" x-model="boxes" @change="save()">
+        Show boxes
+      </label>
+    </header>
+    <div class="mjpeg-container">
+      <img src="{{ mjpeg_url }}" alt="Live MJPEG stream for {{ camera.name }}"
+           data-plain-src="{{ mjpeg_url }}"
+           data-boxes-src="/cameras/{{ camera.name }}/live-boxes.mjpeg"
+           :src="boxes ? $el.dataset.boxesSrc : $el.dataset.plainSrc"
+           onerror="this.alt='Stream unavailable'; this.style.background='#f0f0f0';">
+    </div>
+    <footer>
+      <small>
+        <a href="{{ mjpeg_url }}" target="_blank" rel="noopener">Open stream</a>
+        {% if snapshot_url %}
+        &middot; <a href="{{ snapshot_url }}" target="_blank" rel="noopener">Snapshot</a>
+        {% endif %}
+      </small>
+    </footer>
+  </article>
+  {% elif camera.has_proxy and camera.proxy_mode != 'mjpeg' %}
+  <article>
+    <header>Live preview</header>
+    <p>The proxy runs in <strong>{{ camera.proxy_mode }}</strong> mode on port {{ camera.proxy_port }};
+       open it in an RTSP player. The browser preview needs <code>proxy.mode: mjpeg</code>.</p>
+  </article>
+  {% else %}
+  <article>
+    <header>No live preview</header>
+    <p>Proxy is not enabled for this camera.</p>
+  </article>
+  {% endif %}
+
+  {# Status #}
+  <article>
+    <header>Status</header>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          {% include "partials/status_row.html" %}
+          <tr><th scope="row">Recording</th><td>{{ 'Enabled' if camera.record_enabled else 'Disabled' }}</td></tr>
+          <tr><th scope="row">Proxy</th><td>{% if camera.has_proxy %}{{ camera.proxy_mode }}, port {{ camera.proxy_port }}{% else %}Disabled{% endif %}</td></tr>
+          <tr><th scope="row">Main URL</th><td><code>{{ camera.main_url_redacted }}</code></td></tr>
+          <tr><th scope="row">Sub URL</th><td>{% if camera.sub_url_redacted %}<code>{{ camera.sub_url_redacted }}</code>{% else %}not configured (using main){% endif %}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+</div>
 
 {# Detection (RW-3) #}
 {% include "cameras/_detection_panel.html" %}
 
+{# Detection settings #}
+<article>
+  <header>Detection settings</header>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr>
+          <th scope="row">Detection zones</th>
+          <td>{% if zone_count %}{{ zone_count }} zone(s){% else %}None (whole frame){% endif %}</td>
+          <td>{% if is_admin %}<a href="/cameras/{{ camera.name }}/zones" aria-label="Edit detection zones">Edit</a>{% endif %}</td>
+        </tr>
+        <tr>
+          <th scope="row">Sensitivity</th>
+          <td>{{ sensitivity }} / 100
+            {% if sensitivity >= 70 %}(high){% elif sensitivity > 30 %}(neutral){% else %}(low){% endif %}
+          </td>
+          <td>{% if is_admin %}<a href="/cameras/{{ camera.name }}/sensitivity" aria-label="Edit sensitivity">Edit</a>{% endif %}</td>
+        </tr>
+        <tr>
+          <th scope="row">Detection classes</th>
+          <td>
+            {% if detect_classes is none %}All classes active (no filter)
+            {% elif detect_classes %}{{ detect_classes|length }} class(es) active: {{ detect_classes | join(', ') }}
+            {% else %}0 classes active (no detections will be reported for DNN)
+            {% endif %}
+          </td>
+          <td>{% if is_admin %}<a href="/cameras/{{ camera.name }}/detection-classes" aria-label="Edit detection classes">Edit</a>{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</article>
+
 {# Retention #}
 <article>
   <header>Retention</header>
-  <table>
-    <tbody>
-      <tr>
-        <td>Effective policy</td>
-        <td>
-          {{ effective_retention.max_days | default('-', true) }} days,
-          {{ effective_retention.max_gb | default('-', true) }} GB max,
-          keep last {{ effective_retention.keep_last_n }}
-        </td>
-      </tr>
-      <tr>
-        <td>Source</td>
-        <td>
-          {% if has_per_camera_retention %}
-          <mark>Per-camera override</mark>
-          {% else %}
-          Global default
-          {% endif %}
-        </td>
-      </tr>
-      <tr>
-        <td>Global default</td>
-        <td>
-          {{ global_retention.max_days | default('-', true) }} days,
-          {{ global_retention.max_gb | default('-', true) }} GB max,
-          keep last {{ global_retention.keep_last_n }}
-        </td>
-      </tr>
-      <tr>
-        <td>Cleanup interval</td>
-        <td>{{ effective_retention.cleanup_interval_seconds }}s</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr>
+          <th scope="row">Effective policy</th>
+          <td>
+            {{ effective_retention.max_days | default('-', true) }} days,
+            {{ effective_retention.max_gb | default('-', true) }} GB max,
+            keep last {{ effective_retention.keep_last_n }}
+          </td>
+        </tr>
+        <tr>
+          <th scope="row">Source</th>
+          <td>{% if has_per_camera_retention %}<mark>Per-camera override</mark>{% else %}Global default{% endif %}</td>
+        </tr>
+        <tr>
+          <th scope="row">Global default</th>
+          <td>
+            {{ global_retention.max_days | default('-', true) }} days,
+            {{ global_retention.max_gb | default('-', true) }} GB max,
+            keep last {{ global_retention.keep_last_n }}
+          </td>
+        </tr>
+        <tr>
+          <th scope="row">Cleanup interval</th>
+          <td>{{ effective_retention.cleanup_interval_seconds }}s</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% if is_admin %}
   <details>
     <summary role="button" class="secondary">Edit retention</summary>
+    <p><small>Changes apply after the next restart.</small></p>
     <form method="POST" action="/cameras/{{ camera.name }}/retention">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <div class="grid">
@@ -151,68 +189,8 @@
       </div>
     </form>
   </details>
-</article>
-
-{# Detection Zones #}
-<article>
-  <header>Detection zones</header>
-  <p>Grid-based detection zones let you block parts of the frame to ignore detections in those areas.</p>
-  <a href="/cameras/{{ camera.name }}/zones" role="button" class="secondary">Edit detection zones</a>
-</article>
-
-{# Sensitivity #}
-<article>
-  <header>Sensitivity</header>
-  <table>
-    <tbody>
-      <tr>
-        <td>Current value</td>
-        <td>{{ sensitivity }} / 100
-          {% if sensitivity >= 70 %} (high)
-          {% elif sensitivity > 30 %} (neutral)
-          {% else %} (low)
-          {% endif %}
-        </td>
-      </tr>
-    </tbody>
-  </table>
-  <a href="/cameras/{{ camera.name }}/sensitivity" role="button" class="secondary">Edit sensitivity</a>
-</article>
-
-{# Detection Classes #}
-<article>
-  <header>Detection classes</header>
-  {% if detect_classes is none %}
-  <p>All classes active (no filter)</p>
-  {% elif detect_classes %}
-  <p>{{ detect_classes|length }} class(es) active: {{ detect_classes | join(', ') }}</p>
-  {% else %}
-  <p>0 classes active (no detections will be reported for DNN)</p>
   {% endif %}
-  <a href="/cameras/{{ camera.name }}/detection-classes" role="button" class="secondary">Edit detection classes</a>
 </article>
-
-{# Recent recordings #}
-<h2>Recent recordings</h2>
-{% if recent_recordings %}
-<table>
-  <thead>
-    <tr><th>Time</th><th>Stream</th><th>Size</th><th>Container</th></tr>
-  </thead>
-  <tbody>
-    {% for rec in recent_recordings %}
-    <tr>
-      <td>{{ rec.start_time.strftime('%Y-%m-%d %H:%M') if rec.start_time else '-' }}</td>
-      <td>{{ rec.stream }}</td>
-      <td>{{ rec.size_bytes }}</td>
-      <td>{{ rec.container }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p><small>No recordings for this camera.</small></p>
-{% endif %}
 
 <p><a href="/cameras">&larr; Back to cameras</a></p>
 {% endblock %}

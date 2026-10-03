@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Zone editor: {{ camera_name }}{% endblock %}
+
+{% block content %}
+{% set title = "Detection zone editor" %}
+{% set subtitle = camera_name %}
+{% include "partials/page_header.html" %}
+
+{% include "cameras/zones_editor.html" %}
+
+<p><a href="/cameras/{{ camera_name }}/zones">&larr; Back to zones</a></p>
+{% endblock %}

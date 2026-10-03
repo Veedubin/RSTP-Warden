@@ -12,16 +12,13 @@ import shutil
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from starlette.templating import Jinja2Templates
 
 from ... import __version__
 from ...db import list_users
 from ..auth_depends import CurrentUser, require_admin
-from ..paths import TEMPLATES_DIR
+from ._common import templates
 
 router = APIRouter(prefix="/settings")
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @router.get("", response_class=HTMLResponse)
@@ -69,7 +66,7 @@ async def settings_page(
     web_host = os.getenv("WARDEN_WEB_HOST", "0.0.0.0")
     web_port = os.getenv("WARDEN_WEB_PORT", "8080")
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "settings/form.html",
         {

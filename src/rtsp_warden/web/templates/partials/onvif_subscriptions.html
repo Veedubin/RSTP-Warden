@@ -1,0 +1,53 @@
+{# Event subscription table. Context: rows, events_enabled, sub_message, sub_error. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+<div id="onvif-subscriptions">
+  {% if sub_message %}<p class="flash flash-success" role="status">{{ sub_message }}</p>{% endif %}
+  {% if sub_error %}<p class="flash flash-error" role="alert">{{ sub_error }}</p>{% endif %}
+  {% if not events_enabled %}
+  <p class="small">Event subscriptions are off. Set <code>onvif.events_enabled: true</code> in config.yaml to use them.</p>
+  {% endif %}
+  {% if rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Camera</th><th>Status</th><th>Last event</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set row_url = row.camera_name|urlencode %}
+        <tr>
+          <td>{{ row.camera_name }}</td>
+          <td>
+            {% if not row.subscribed %}
+            <span class="status-badge status-idle">not subscribed</span>
+            {% elif row.is_running %}
+            <span class="status-badge status-running">subscribed</span>
+            {% else %}
+            <span class="status-badge status-failed">stopped</span>
+            {% endif %}
+          </td>
+          <td>{{ row.last_event_time or "-" }}</td>
+          <td>
+            {% if row.subscribed %}
+            <form class="onvif-row-form" method="post" action="/onvif/cameras/{{ row_url }}/events/unsubscribe"
+                  hx-post="/onvif/cameras/{{ row_url }}/events/unsubscribe" hx-target="#onvif-subscriptions" hx-swap="outerHTML">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <button type="submit" class="secondary outline">Unsubscribe</button>
+            </form>
+            {% elif events_enabled %}
+            <form class="onvif-row-form" method="post" action="/onvif/cameras/{{ row_url }}/events/subscribe"
+                  hx-post="/onvif/cameras/{{ row_url }}/events/subscribe" hx-target="#onvif-subscriptions" hx-swap="outerHTML">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <button type="submit">Subscribe</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="small">No cameras configured.</p>
+  {% endif %}
+</div>

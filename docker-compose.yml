@@ -16,7 +16,7 @@ services:
       - "8080:8080"     # Web UI
       - "9001:9001"     # MJPEG proxy (optional; only if MJPEG proxy enabled)
     volumes:
-      - ./config:/app/config:ro              # config.yaml goes here
+      - ./config:/app/config                 # config.yaml + .env; the web UI writes here
       - ./recordings:/app/recordings          # persisted recordings
       - ./data:/app/data                      # SQLite DB lives here
     environment:

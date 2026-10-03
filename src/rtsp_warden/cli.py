@@ -4,7 +4,6 @@ import importlib
 import json
 import os
 import re
-import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from .config import AppConfig, load_config
 from .ffmpeg import which_or_raise
 from .frame_tap import FrameConsumer
 from .logging_utils import setup_logging
+from .ports import port_is_free as _port_is_free
 from .status_model import camera_detection_summary, redact_rtsp_url
 from .web.config import WebSettings
 from .web.server import WebUIServer
@@ -27,10 +27,22 @@ app = typer.Typer(add_completion=False, help="rtsp-warden: record RTSP streams +
 console = Console()
 
 
-SAMPLE_CONFIG_YAML = """cameras:
+SAMPLE_CONFIG_YAML = """# rtsp-warden starter config, written by `rtsp-warden init-config`.
+#
+# Camera logins are not stored in this file. ${CAM_USER} and ${CAM_PASS} are read from
+# the environment, or from a .env file next to this config.yaml (a .env in the
+# directory you start rtsp-warden from works too). Example .env:
+#   CAM_USER=admin
+#   CAM_PASS=your-camera-password
+# Percent-encode @ : / ? # % in those values (p@ss becomes p%40ss).
+# Cameras added from the web UI get their own CAM_<NAME>_USER / CAM_<NAME>_PASS
+# variables, written to that same .env file.
+cameras:
   - name: front
-    main_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/101
-    sub_url: rtsp://user:pass@192.168.1.50:554/Streaming/Channels/102
+    main_url: rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.50:554/Streaming/Channels/101
+    # sub_url is optional. Without it, live view and detection use main_url and only
+    # the main stream is recorded.
+    # sub_url: rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.50:554/Streaming/Channels/102
 
     record:
       enabled: true
@@ -43,7 +55,7 @@ SAMPLE_CONFIG_YAML = """cameras:
         chunk_seconds: 300
         rtsp_transport: tcp
 
-      # Sub stream: TS container (NVR-grade default)
+      # Sub stream: recorded only when sub_url is set
       sub:
         enabled: true
         container: ts
@@ -59,7 +71,7 @@ SAMPLE_CONFIG_YAML = """cameras:
     proxy:
       enabled: true
       mode: mjpeg         # mjpeg | rtsp
-      stream: sub         # main | sub
+      stream: sub         # main | sub (falls back to main while sub_url is not set)
       bind_host: 0.0.0.0
       port: 9001
 
@@ -92,11 +104,30 @@ def _load_cfg(config: Path) -> AppConfig:
 
 
 def _parse_dotenv_value(raw: str) -> str:
-    """Return the value part of a .env line: quoted strings verbatim, else up to a ' #' comment."""
+    """Return the value part of a .env line.
+
+    Double-quoted values end at the first unescaped ``"``; inside them ``\\"`` and
+    ``\\\\`` stand for ``"`` and ``\\`` (what ``web.env_file.upsert_env_vars`` writes) and
+    any other backslash is kept as is. Single-quoted values are verbatim up to the next
+    ``'``. Unquoted values stop at a `` #`` comment.
+    """
     raw = raw.strip()
-    if raw[:1] in ("'", '"'):
-        quote = raw[0]
-        end = raw.find(quote, 1)
+    if raw[:1] == '"':
+        out: list[str] = []
+        i = 1
+        while i < len(raw):
+            ch = raw[i]
+            if ch == "\\" and raw[i + 1 : i + 2] in ('"', "\\"):
+                out.append(raw[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                break
+            out.append(ch)
+            i += 1
+        return "".join(out)
+    if raw[:1] == "'":
+        end = raw.find("'", 1)
         return raw[1:end] if end != -1 else raw[1:]
     for marker in (" #", "\t#"):
         if marker in raw:
@@ -104,11 +135,11 @@ def _parse_dotenv_value(raw: str) -> str:
     return raw.strip()
 
 
-def _load_dotenv(path: Path = Path(".env")) -> None:
-    """Parse a simple KEY="VALUE" .env file and set env vars. No python-dotenv dep.
+def _load_dotenv_file(path: Path) -> None:
+    """Parse one simple KEY="VALUE" .env file and set env vars. No python-dotenv dep.
 
     Trailing ``# comments`` after a value are ignored, matching what shells and
-    systemd users expect.
+    systemd users expect. A variable that is already set is never overridden.
     """
     if not path.exists():
         return
@@ -126,6 +157,27 @@ def _load_dotenv(path: Path = Path(".env")) -> None:
             os.environ[key] = value
 
 
+def _load_dotenv(config_path: Path | None = None) -> None:
+    """Load ``<config dir>/.env`` and then ``./.env`` into ``os.environ``.
+
+    The web UI writes camera credentials to the ``.env`` next to config.yaml, so that
+    file is read first. A variable that is already set (by the process environment or
+    by the file read before) is never overridden. A file is read only once when the
+    config sits in the working directory.
+    """
+    candidates: list[Path] = []
+    if config_path is not None:
+        candidates.append(config_path.parent / ".env")
+    candidates.append(Path(".env"))
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        _load_dotenv_file(path)
+
+
 def _resolve_web_settings(host: str | None, port: int | None) -> WebSettings:
     """CLI flags override WARDEN_WEB_HOST / WARDEN_WEB_PORT, which override defaults."""
     settings = WebSettings()
@@ -134,16 +186,6 @@ def _resolve_web_settings(host: str | None, port: int | None) -> WebSettings:
     if port:
         settings.port = port
     return settings
-
-
-def _port_is_free(host: str, port: int) -> bool:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, int(port)))
-        return True
-    except OSError:
-        return False
 
 
 def _require_binaries(cfg: AppConfig) -> None:
@@ -500,7 +542,7 @@ def doctor(
     ),
 ) -> None:
     """Validate config + check binaries + check proxy ports are available."""
-    _load_dotenv()
+    _load_dotenv(config)
     cfg = _load_cfg(config)
 
     table = Table(title="rtsp-warden doctor")
@@ -584,7 +626,7 @@ def serve(
     from .actions.base import quiet_http_loggers
     from .db.bootstrap import bootstrap_database
 
-    _load_dotenv()
+    _load_dotenv(config)
     setup_logging(verbosity=verbosity)  # type: ignore[arg-type]
     # httpx logs full request URLs (ntfy topics, webhook ids) at INFO: keep it at WARNING.
     quiet_http_loggers()
@@ -649,7 +691,7 @@ def status(
     ),
 ) -> None:
     """Print a single JSON status snapshot to stdout."""
-    _load_dotenv()
+    _load_dotenv(config)
     cfg = _load_cfg(config)
     rt = AppRuntime(cfg=cfg)
     rt.build()

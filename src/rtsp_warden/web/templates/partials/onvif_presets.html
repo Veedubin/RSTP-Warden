@@ -1,0 +1,73 @@
+{# Presets panel for one camera. Context: camera, presets, ptz_enabled, preset_message, preset_error, preset_form. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+{% set cam_url = camera.name|urlencode %}
+<article id="onvif-presets">
+  <header><strong>Presets</strong></header>
+  {% if preset_message %}<p class="flash flash-success" role="status">{{ preset_message }}</p>{% endif %}
+  {% if preset_error %}<p class="flash flash-error" role="alert">{{ preset_error }}</p>{% endif %}
+  {% if presets %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Pan</th><th>Tilt</th><th>Zoom</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for p in presets %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td>{{ "%.2f"|format(p.pan) }}</td>
+          <td>{{ "%.2f"|format(p.tilt) }}</td>
+          <td>{{ "%.2f"|format(p.zoom) }}</td>
+          <td>
+            {% if ptz_enabled %}
+            <form class="onvif-row-form" method="post" action="/onvif/cameras/{{ cam_url }}/ptz/goto"
+                  hx-post="/onvif/cameras/{{ cam_url }}/ptz/goto" hx-target="#onvif-presets" hx-swap="outerHTML">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <input type="hidden" name="preset_name" value="{{ p.name }}">
+              <button type="submit">Go</button>
+            </form>
+            {% endif %}
+            <form class="onvif-row-form" method="post" action="/onvif/cameras/{{ cam_url }}/ptz/delete"
+                  hx-post="/onvif/cameras/{{ cam_url }}/ptz/delete" hx-target="#onvif-presets" hx-swap="outerHTML"
+                  hx-confirm="Delete preset {{ p.name }}?">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <input type="hidden" name="preset_name" value="{{ p.name }}">
+              <button type="submit" class="secondary outline">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="small">No presets saved for this camera.</p>
+  {% endif %}
+  <details{% if preset_form %} open{% endif %}>
+    <summary>Add preset</summary>
+    <form method="post" action="/onvif/cameras/{{ cam_url }}/ptz/save"
+          hx-post="/onvif/cameras/{{ cam_url }}/ptz/save" hx-target="#onvif-presets" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label for="preset-name">Name
+        <input id="preset-name" name="preset_name" type="text" required maxlength="64"
+               placeholder="front_gate" value="{{ preset_form.preset_name if preset_form else '' }}">
+      </label>
+      <div class="grid">
+        <label for="preset-pan">Pan (-1 to 1)
+          <input id="preset-pan" name="pan" type="number" step="0.01" min="-1" max="1"
+                 value="{{ preset_form.pan if preset_form else '0' }}">
+        </label>
+        <label for="preset-tilt">Tilt (-1 to 1)
+          <input id="preset-tilt" name="tilt" type="number" step="0.01" min="-1" max="1"
+                 value="{{ preset_form.tilt if preset_form else '0' }}">
+        </label>
+        <label for="preset-zoom">Zoom (0 to 1)
+          <input id="preset-zoom" name="zoom" type="number" step="0.01" min="0" max="1"
+                 value="{{ preset_form.zoom if preset_form else '0' }}">
+        </label>
+      </div>
+      <button type="submit">Save preset</button>
+    </form>
+    <p class="small">Values are typed in, not read from the camera. Saving a name that exists replaces it. Presets are written to config.yaml.</p>
+  </details>
+</article>

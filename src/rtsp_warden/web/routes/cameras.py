@@ -10,15 +10,14 @@ in ``web/routes/detection.py``.
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 
-from ...config import CameraConfig
 from ..auth_depends import CurrentUser, require_admin, require_user
 from ..services.cameras import get_camera_by_name, list_cameras
 from ..services.preview import MJPEG_CONTENT_TYPE, find_hub, mjpeg_frames
-from ..services.recordings import list_recordings
 from ._common import find_camera, get_cfg, templates
 
 log = logging.getLogger(__name__)
@@ -66,12 +65,37 @@ async def camera_live(request: Request, name: str, user=Depends(require_user)) -
     )
 
 
+# htmx stops an "every Ns" poll when a response has this status, then swaps in the
+# (empty) body, so the polling element disappears.
+HTMX_STOP_POLLING = 286
+
+
+def _missing_camera(request: Request, name: str) -> Response:
+    """Answer a status poll or page request for a camera that is not configured.
+
+    An htmx poll gets 286 with an empty body: htmx removes the polling card or row and
+    stops polling, so a deleted camera does not poll a 404 forever. Anything else is 404.
+    """
+    if request.headers.get("hx-request") == "true":
+        return Response(status_code=HTMX_STOP_POLLING)
+    raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
+
+
 @router.get("/{name}", response_class=HTMLResponse)
-async def camera_detail(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
-    """Render a single camera detail page."""
+async def camera_detail(
+    request: Request, name: str, user: CurrentUser = Depends(require_user)
+) -> HTMLResponse:
+    """Render a single camera detail page.
+
+    Admin-only controls (edit, zones, sensitivity, classes, the retention form) are
+    rendered only for admins; viewers would get 403 on every one of them.
+    """
+    from ...retention_resolver import resolve_retention
+
     cfg = get_cfg(request)
+    cam_config = find_camera(cfg, name)
     cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
-    if cam is None:
+    if cam_config is None or cam is None:
         raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
 
     # Same-origin preview URLs served by this app from the in-process FrameHub.
@@ -81,113 +105,62 @@ async def camera_detail(request: Request, name: str, user=Depends(require_user))
         mjpeg_url = f"/cameras/{name}/live.mjpeg"
         snapshot_url = f"/cameras/{name}/snapshot.jpg"
 
-    # Recent recordings for this camera (last 10)
-    try:
-        recent_recordings, _ = list_recordings(camera_name=name, limit=10)
-    except Exception:
-        recent_recordings = []
-
-    # Retention info for the detail page
-    cam_config = find_camera(cfg, name)
-    from ...retention_resolver import resolve_retention
-
-    effective_retention = (
-        resolve_retention(cam_config, cfg.retention) if cam_config else cfg.retention
-    )
-    has_per_camera_retention = cam_config.retention is not None if cam_config else False
-
-    # Sensitivity and detect_classes for the detail page
-    sensitivity = cam_config.sensitivity if cam_config else 50.0
-    detect_classes = cam_config.detect_classes if cam_config else None
-
     return templates.TemplateResponse(
         request,
         "cameras/detail.html",
         {
             "request": request,
             "camera": cam,
+            "is_admin": user.role == "admin",
             "mjpeg_url": mjpeg_url,
             "snapshot_url": snapshot_url,
-            "recent_recordings": recent_recordings,
-            "effective_retention": effective_retention,
-            "has_per_camera_retention": has_per_camera_retention,
+            "effective_retention": resolve_retention(cam_config, cfg.retention),
+            "has_per_camera_retention": cam_config.retention is not None,
             "global_retention": cfg.retention,
-            "sensitivity": sensitivity,
-            "detect_classes": detect_classes,
+            "sensitivity": cam_config.sensitivity,
+            "detect_classes": cam_config.detect_classes,
+            "zone_count": len(cam_config.zones),
         },
     )
 
 
 @router.get("/{name}/status", response_class=HTMLResponse)
-async def camera_status(request: Request, name: str, user=Depends(require_user)) -> HTMLResponse:
-    """Return a partial camera card for htmx auto-refresh."""
+async def camera_status(
+    request: Request, name: str, user: CurrentUser = Depends(require_user)
+) -> Response:
+    """Return the camera card partial; every card polls this every 5 s."""
     cfg = get_cfg(request)
     cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
     if cam is None:
-        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
-
+        return _missing_camera(request, name)
     return templates.TemplateResponse(
         request,
         "partials/camera_card.html",
-        {
-            "request": request,
-            "camera": cam,
-        },
+        {"request": request, "camera": cam},
     )
 
 
-@router.get("/{name}/settings", response_class=HTMLResponse)
-async def camera_settings(
-    request: Request, name: str, user: CurrentUser = Depends(require_admin)
-) -> HTMLResponse:
-    """Render the read-only camera settings page (admin-only).
-
-    Displays the camera's full configuration and a banner explaining
-    that changes require editing config.yaml and restarting the server.
-    """
+@router.get("/{name}/status-row", response_class=HTMLResponse)
+async def camera_status_row(
+    request: Request, name: str, user: CurrentUser = Depends(require_user)
+) -> Response:
+    """Return the detail page's status ``<tr>``; the row polls this every 5 s."""
     cfg = get_cfg(request)
-    # Find the raw CameraConfig object (not the dict from get_camera_by_name)
-    cam_config: CameraConfig | None = None
-    for cam in cfg.cameras:
-        if cam.name == name:
-            cam_config = cam
-            break
-
-    if cam_config is None:
-        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
-
-    # Build a display-friendly dict (redact URLs)
-    from ...status_model import redact_rtsp_url
-
-    settings_data = {
-        "name": cam_config.name,
-        "main_url_redacted": redact_rtsp_url(cam_config.main_url),
-        "sub_url_redacted": redact_rtsp_url(cam_config.sub_url) if cam_config.sub_url else None,
-        "record_enabled": cam_config.record.enabled,
-        "record_output_dir": str(cam_config.record.output_dir),
-        "record_container": cam_config.record.main.container,
-        "record_chunk_seconds": cam_config.record.main.chunk_seconds,
-        "record_transport": cam_config.record.main.rtsp_transport,
-        "proxy_enabled": cam_config.proxy.enabled,
-        "proxy_mode": cam_config.proxy.mode,
-        "proxy_stream": cam_config.proxy.stream,
-        "proxy_bind_host": cam_config.proxy.bind_host,
-        "proxy_port": cam_config.proxy.port,
-        "proxy_fps": cam_config.proxy.fps,
-    }
-
-    # Retention settings
-    retention = cam_config.record.retention
-    settings_data["retention_max_days"] = retention.max_days
-    settings_data["retention_max_gb"] = retention.max_gb
-    settings_data["retention_keep_last_n"] = retention.keep_last_n
-
+    cam = get_camera_by_name(cfg, name, request.app.state.runtime_provider())
+    if cam is None:
+        return _missing_camera(request, name)
     return templates.TemplateResponse(
         request,
-        "cameras/settings.html",
-        {
-            "request": request,
-            "camera_name": name,
-            "settings": settings_data,
-        },
+        "partials/status_row.html",
+        {"request": request, "camera": cam},
     )
+
+
+@router.get("/{name}/settings")
+async def camera_settings_redirect(
+    request: Request, name: str, user: CurrentUser = Depends(require_admin)
+) -> RedirectResponse:
+    """Old read-only settings page; camera settings are now edited at /cameras/{name}/edit."""
+    if find_camera(get_cfg(request), name) is None:
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} not found")
+    return RedirectResponse(url=f"/cameras/{quote(name, safe='')}/edit", status_code=303)

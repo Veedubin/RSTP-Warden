@@ -1,0 +1,12 @@
+{#
+  One-time display of a newly created API token, included by
+  partials/tokens_table.html. Expects: new_token_raw.
+#}
+<div class="token-created">
+  <p class="flash flash-success" role="status">
+    Token created successfully. Copy it now -- it will not be shown again.
+  </p>
+  {% set secret_value = new_token_raw %}
+  {% set secret_label = "API Token" %}
+  {% include "partials/password_reveal.html" %}
+</div>

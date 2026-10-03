@@ -284,7 +284,7 @@ def test_actions_page_empty_state(db_with_user: str) -> None:
 def test_nav_links_to_actions_not_alerts(admin_client: TestClient) -> None:
     r = admin_client.get("/actions")
     assert r.status_code == 200
-    assert '<a href="/actions">Actions</a>' in r.text
+    assert 'href="/actions"' in r.text and ">Actions</a>" in r.text
     assert 'href="/alerts"' not in r.text
 
 

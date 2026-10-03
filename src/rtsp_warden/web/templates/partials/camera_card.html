@@ -1,25 +1,23 @@
+{# One camera card: first paint on /cameras and the dashboard, and the body of every
+   5 s poll of GET /cameras/{name}/status (outerHTML swap). Expects `camera`, a
+   web.services.cameras.list_cameras() dict. -#}
 <article class="camera-card" id="camera-card-{{ camera.name }}"
          hx-get="/cameras/{{ camera.name }}/status"
          hx-trigger="every 5s"
          hx-swap="outerHTML">
   <header>
     <a href="/cameras/{{ camera.name }}">{{ camera.name }}</a>
-    <span class="status-dot status-{{ camera.status }}" title="{{ camera.status }}"></span>
-    <small class="status-label status-{{ camera.status }}">
-      {% if camera.status == 'restarting' %}restarting in {{ camera.restart_in }}s
-      {% else %}{{ camera.status }}{% endif %}
-    </small>
+    <span class="status-badge status-{{ camera.status }}">{{ camera.status_label }}</span>
   </header>
   <div class="camera-card-body">
     <small>
-      {% if camera.record_enabled %}Recording{% endif %}
-      {% if camera.record_enabled and camera.has_proxy %} + {% endif %}
-      {% if camera.has_proxy %}{{ camera.proxy_mode | upper }} :{{ camera.proxy_port }}{% endif %}
+      {{ 'Recording' if camera.record_enabled else 'Not recording' }}
+      {% if camera.has_proxy %}&middot; {{ camera.proxy_mode | upper }} :{{ camera.proxy_port }}{% endif %}
     </small>
     <br>
     <small>{{ camera.main_url_redacted }}</small>
     {% if camera.last_error and camera.status != 'running' %}
-    <br><small class="camera-error" title="{{ camera.last_error }}">{{ camera.last_error[:120] }}</small>
+    <br><small class="camera-error" title="{{ camera.last_error }}">{{ camera.last_error[:160] }}</small>
     {% endif %}
   </div>
 </article>

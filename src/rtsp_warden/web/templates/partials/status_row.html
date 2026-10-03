@@ -1,0 +1,18 @@
+{# Status row of the camera detail page's Status table, and the body of every 5 s poll
+   of GET /cameras/{name}/status-row (outerHTML swap). Expects `camera`, a
+   web.services.cameras.list_cameras() dict. -#}
+<tr id="camera-status-row"
+    hx-get="/cameras/{{ camera.name }}/status-row"
+    hx-trigger="every 5s"
+    hx-swap="outerHTML">
+  <th scope="row">Status</th>
+  <td>
+    <span class="status-badge status-{{ camera.status }}">{{ camera.status_label }}</span>
+    {% if camera.last_frame_age is not none %}
+    <small>last frame {{ camera.last_frame_age | round | int }} s ago</small>
+    {% endif %}
+    {% if camera.last_error and camera.status != 'running' %}
+    <br><small class="camera-error">{{ camera.last_error }}</small>
+    {% endif %}
+  </td>
+</tr>

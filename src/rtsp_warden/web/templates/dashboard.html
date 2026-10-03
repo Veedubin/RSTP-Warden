@@ -2,7 +2,8 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
+{% set title = "Dashboard" %}
+{% include "partials/page_header.html" %}
 
 {# Stat cards row #}
 <div class="grid">
@@ -33,24 +34,7 @@
 <h2>Cameras</h2>
 <div class="camera-grid">
   {% for cam in cameras %}
-  <article class="camera-card" id="camera-card-{{ cam.name }}"
-           hx-get="/cameras/{{ cam.name }}/status"
-           hx-trigger="every 5s"
-           hx-swap="outerHTML">
-    <header>
-      <a href="/cameras/{{ cam.name }}">{{ cam.name }}</a>
-      <span class="status-dot status-{{ cam.status }}"></span>
-    </header>
-    <div class="camera-card-body">
-      <small>
-        {% if cam.record_enabled %}Recording{% endif %}
-        {% if cam.record_enabled and cam.has_proxy %} + {% endif %}
-        {% if cam.has_proxy %}{{ cam.proxy_mode | upper }} :{{ cam.proxy_port }}{% endif %}
-      </small>
-      <br>
-      <small>{{ cam.main_url_redacted }}</small>
-    </div>
-  </article>
+  {% with camera = cam %}{% include "partials/camera_card.html" %}{% endwith %}
   {% endfor %}
 </div>
 {% else %}

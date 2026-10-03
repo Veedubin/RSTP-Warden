@@ -30,8 +30,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ReadWritePaths=/var/lib/rtsp-warden /var/log/rtsp-warden
-ReadOnlyPaths=/etc/rtsp-warden
+ReadWritePaths=/var/lib/rtsp-warden /var/log/rtsp-warden /etc/rtsp-warden
 
 # Environment
 EnvironmentFile=-/etc/rtsp-warden/warden.env

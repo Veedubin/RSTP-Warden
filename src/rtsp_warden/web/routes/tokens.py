@@ -2,36 +2,61 @@
 
 Provides per-user token listing, creation (with one-time raw display),
 and revocation. All routes require authentication (require_user).
+
+The create and revoke forms on ``tokens/list.html`` are htmx forms that swap
+``#tokens-panel``: an htmx request gets only ``partials/tokens_table.html``
+back (200, errors shown inside it). Without htmx the routes render the whole
+page (200) as before; an unknown token is still a 404 there.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from starlette.templating import Jinja2Templates
 
 from ... import auth
 from ...db import get_user_by_id
 from ..auth_depends import CurrentUser, require_user
 from ..csrf import check_csrf_form
-from ..paths import TEMPLATES_DIR
+from ._common import is_htmx, templates
 
 router = APIRouter(prefix="/api-tokens")
 
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+def _render_tokens(
+    request: Request,
+    user: CurrentUser,
+    *,
+    new_token_raw: str | None = None,
+    notice: str | None = None,
+    error: str | None = None,
+) -> HTMLResponse:
+    """Render the token panel for an htmx request, else the whole tokens page."""
+    template = "partials/tokens_table.html" if is_htmx(request) else "tokens/list.html"
+    return templates.TemplateResponse(
+        request,
+        template,
+        {
+            "request": request,
+            "tokens": auth.list_api_tokens(user.user_id),
+            "new_token_raw": new_token_raw,
+            "notice": notice,
+            "error": error,
+        },
+    )
 
 
 @router.get("", response_class=HTMLResponse)
 async def tokens_list(request: Request, user: CurrentUser = Depends(require_user)) -> HTMLResponse:
     """Render the API tokens list page for the current user."""
-    tokens = auth.list_api_tokens(user.user_id)
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "tokens/list.html",
         {
             "request": request,
-            "tokens": tokens,
+            "tokens": auth.list_api_tokens(user.user_id),
             "new_token_raw": None,
+            "notice": None,
             "error": None,
         },
     )
@@ -66,17 +91,7 @@ async def create_token(
         errors.append("Expiry must be a valid number of days.")
 
     if errors:
-        tokens = auth.list_api_tokens(user.user_id)
-        return _templates.TemplateResponse(
-            request,
-            "tokens/list.html",
-            {
-                "request": request,
-                "tokens": tokens,
-                "new_token_raw": None,
-                "error": " ".join(errors),
-            },
-        )
+        return _render_tokens(request, user, error=" ".join(errors))
 
     # Look up the User ORM object for create_api_token
     db_user = get_user_by_id(user.user_id)
@@ -84,20 +99,7 @@ async def create_token(
         raise HTTPException(status_code=404, detail="User not found")
 
     token_obj = auth.create_api_token(db_user, name=name, ttl_seconds=ttl_seconds)
-
-    # Refresh token list (includes the new one minus the raw value)
-    tokens = auth.list_api_tokens(user.user_id)
-
-    return _templates.TemplateResponse(
-        request,
-        "tokens/list.html",
-        {
-            "request": request,
-            "tokens": tokens,
-            "new_token_raw": token_obj.raw,
-            "error": None,
-        },
-    )
+    return _render_tokens(request, user, new_token_raw=token_obj.raw)
 
 
 @router.post("/{token_id}/revoke")
@@ -115,26 +117,16 @@ async def revoke_token(
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid")
 
     # Find the token to verify ownership
-    tokens = auth.list_api_tokens(user.user_id)
     target = None
-    for t in tokens:
+    for t in auth.list_api_tokens(user.user_id):
         if t["id"] == token_id:
             target = t
             break
 
     if target is None:
+        if is_htmx(request):
+            return _render_tokens(request, user, error="Token not found.")
         raise HTTPException(status_code=404, detail="Token not found")
 
     auth.revoke_api_token(target["prefix"])
-
-    tokens = auth.list_api_tokens(user.user_id)
-    return _templates.TemplateResponse(
-        request,
-        "tokens/list.html",
-        {
-            "request": request,
-            "tokens": tokens,
-            "new_token_raw": None,
-            "error": None,
-        },
-    )
+    return _render_tokens(request, user, notice=f"Token {target['name']} revoked.")

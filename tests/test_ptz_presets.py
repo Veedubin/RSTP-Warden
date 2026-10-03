@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from rtsp_warden.config import AppConfig, CameraConfig, PTZPresetConfig
+from rtsp_warden.config import AppConfig, CameraConfig, PTZPresetConfig, load_config
 from rtsp_warden.onvif.presets import PTZPreset, PTZPresetError, PTZPresetStore
 from rtsp_warden.onvif.ptz import OnvifPTZ
 
@@ -492,3 +492,99 @@ class TestCameraConfigPresets:
         assert len(cfg2.cameras[0].presets) == 2
         assert cfg2.cameras[0].presets[0].name == "home"
         assert cfg2.cameras[0].presets[1].pan == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Locked raw-YAML write-back (RW-2 Task 9)
+# ---------------------------------------------------------------------------
+
+_RAW_CONFIG_WITH_ENV = """\
+cameras:
+  - name: front_door
+    main_url: rtsp://${CAM_USER}:${CAM_PASS}@192.0.2.10:554/videoMain
+    presets:
+      - name: gate
+        pan: 0.25
+        tilt: 0.3
+        zoom: 0.0
+"""
+
+
+class TestPresetWriteBack:
+    """Preset writes patch the raw camera entry under the config lock."""
+
+    @pytest.fixture
+    def env_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setenv("CAM_USER", "u")
+        monkeypatch.setenv("CAM_PASS", "pw-must-not-leak")
+        path = tmp_path / "config.yaml"
+        path.write_text(_RAW_CONFIG_WITH_ENV, encoding="utf-8")
+        return path
+
+    @pytest.mark.asyncio
+    async def test_save_keeps_env_references_and_takes_the_lock(self, env_config: Path) -> None:
+        store = PTZPresetStore(load_config(env_config), config_path=env_config)
+        await store.save_preset("front_door", "driveway", 0.5, -0.25, 1.0)
+
+        text = env_config.read_text(encoding="utf-8")
+        assert "${CAM_USER}:${CAM_PASS}" in text
+        assert "pw-must-not-leak" not in text
+        assert (env_config.parent / ".config.yaml.lock").exists()
+        raw = yaml.safe_load(text)
+        assert raw["cameras"][0]["presets"] == [
+            {"name": "gate", "pan": 0.25, "tilt": 0.3, "zoom": 0.0},
+            {"name": "driveway", "pan": 0.5, "tilt": -0.25, "zoom": 1.0},
+        ]
+        assert "detectors" not in raw["cameras"][0]
+
+    @pytest.mark.asyncio
+    async def test_delete_last_preset_removes_the_key(self, env_config: Path) -> None:
+        store = PTZPresetStore(load_config(env_config), config_path=env_config)
+        assert await store.delete_preset("front_door", "gate") is True
+
+        text = env_config.read_text(encoding="utf-8")
+        assert "presets" not in yaml.safe_load(text)["cameras"][0]
+        assert "${CAM_PASS}" in text
+
+    @pytest.mark.asyncio
+    async def test_injected_persist_gets_camera_and_whole_list(self) -> None:
+        calls: list[tuple[str, list[dict]]] = []
+        cfg = _make_config_with_presets(presets=[("home", 0.0, 0.0, 0.0)])
+        store = PTZPresetStore(cfg, persist=lambda cam, presets: calls.append((cam, presets)))
+
+        await store.save_preset("front_door", "gate", 0.5, -0.5, 1.0)
+        await store.delete_preset("front_door", "home")
+
+        assert calls == [
+            (
+                "front_door",
+                [
+                    {"name": "home", "pan": 0.0, "tilt": 0.0, "zoom": 0.0},
+                    {"name": "gate", "pan": 0.5, "tilt": -0.5, "zoom": 1.0},
+                ],
+            ),
+            ("front_door", [{"name": "gate", "pan": 0.5, "tilt": -0.5, "zoom": 1.0}]),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_failed_persist_leaves_memory_unchanged(self) -> None:
+        def refuse(camera_name: str, presets: list[dict]) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        cfg = _make_config_with_presets(presets=[("home", 0.0, 0.0, 0.0)])
+        store = PTZPresetStore(cfg, persist=refuse)
+
+        with pytest.raises(PermissionError):
+            await store.save_preset("front_door", "gate", 0.1, 0.1, 0.1)
+        with pytest.raises(PermissionError):
+            await store.delete_preset("front_door", "home")
+        assert [p.name for p in store.list_presets("front_door")] == ["home"]
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_value_is_a_preset_error_and_keeps_the_old_preset(self) -> None:
+        cfg = _make_config_with_presets(presets=[("gate", 0.1, 0.1, 0.1)])
+        store = PTZPresetStore(cfg)
+
+        with pytest.raises(PTZPresetError, match="pan/tilt must be between -1.0 and 1.0"):
+            await store.save_preset("front_door", "gate", 5.0, 0.0, 0.0)
+        assert store.get_preset("front_door", "gate") == PTZPreset("gate", 0.1, 0.1, 0.1)

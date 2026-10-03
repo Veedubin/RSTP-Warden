@@ -489,9 +489,12 @@ def test_save_zone_write_failure_names_the_path(
     """R9: a read-only config.yaml is reported with its path, never as a 500."""
     _read_only(monkeypatch)
     r = _save(admin, zone_name="porch")
-    assert r.status_code == 503
-    assert str(zones_config) in r.text
-    assert "Read-only file system" in r.text
+    assert r.status_code == 303
+    assert r.headers["location"] == "/cameras/yard/zones"
+    assert any(c.startswith("warden_flash=") for c in r.headers.get_list("set-cookie"))
+    page = admin.get("/cameras/yard/zones").text
+    assert str(zones_config) in page
+    assert "Read-only file system" in page
 
 
 def test_save_zone_write_failure_is_shown_to_htmx(
@@ -507,8 +510,8 @@ def test_save_zone_write_failure_is_shown_to_htmx(
         follow_redirects=False,
     )
     assert r.status_code == 200
-    assert str(zones_config) in r.text
-    assert "until the next restart" in r.text
+    assert r.headers["HX-Redirect"] == "/cameras/yard/zones"
+    assert any(c.startswith("warden_flash=") for c in r.headers.get_list("set-cookie"))
 
 
 def test_delete_zone_write_failure_names_the_path(
@@ -516,5 +519,7 @@ def test_delete_zone_write_failure_names_the_path(
 ) -> None:
     _read_only(monkeypatch)
     r = _delete(admin, "lawn")
-    assert r.status_code == 503
-    assert str(zones_config) in r.text
+    assert r.status_code == 303
+    assert r.headers["location"] == "/cameras/yard/zones"
+    page = admin.get("/cameras/yard/zones").text
+    assert str(zones_config) in page

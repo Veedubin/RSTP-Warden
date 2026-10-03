@@ -3,13 +3,14 @@
 {% block title %}New User{% endblock %}
 
 {% block content %}
-<article>
-  <h1>Create New User</h1>
+{% set title = "Create New User" %}
+{% include "partials/page_header.html" %}
 
+<article>
   {% if generated_password %}
-  <ins data-color="success" role="alert">
+  <p class="flash flash-success" role="status">
     User <strong>{{ username }}</strong> created successfully.
-  </ins>
+  </p>
   <p><strong>Save the password now -- it will not be shown again:</strong></p>
   {% set secret_value = generated_password %}
   {% set secret_label = "Password" %}
@@ -17,12 +18,11 @@
   <a href="/users" role="button" class="secondary">Back to Users</a>
   {% else %}
   {% if error %}
-  <ins data-color="danger" role="alert">{{ error }}</ins>
+  <p class="flash flash-error" role="alert">{{ error }}</p>
   {% endif %}
 
-  <form method="POST" action="/users/new"
-        hx-post="/users/new"
-        hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+  {# A plain form on purpose: the response is a whole page, which htmx would nest inside the form. #}
+  <form method="POST" action="/users/new">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
 
     <label for="username">Username</label>
@@ -31,10 +31,10 @@
            placeholder="3-32 chars, letters, digits, underscores">
 
     <label for="password">Password</label>
-    <div x-data="{ generated: false, pw: '' }" class="grid" style="grid-template-columns: 1fr auto;">
+    <div role="group" x-data="{ pw: '' }">
       <input type="text" id="password" name="password" x-model="pw"
              placeholder="Leave blank to auto-generate" autocomplete="new-password">
-      <button type="button" class="secondary outline"
+      <button type="button" class="secondary"
               @click="pw = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)">
         Auto-generate
       </button>

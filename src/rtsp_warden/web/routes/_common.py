@@ -1,16 +1,34 @@
-"""Helpers shared by route modules: config access, config path, camera lookup, templates."""
+"""Helpers shared by route modules: templates, flash messages, config access, camera lookup."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from fastapi import HTTPException, Request
+from starlette.responses import Response
 from starlette.templating import Jinja2Templates
 
+from ... import __version__
 from ...config import AppConfig, CameraConfig
+from ..flash import FLASH_COOKIE, FLASH_MAX_AGE_SECONDS, FlashLevel, encode_flash
 from ..paths import TEMPLATES_DIR
 
+# The one Jinja2Templates instance. Every route module renders through it, so a global
+# registered here (the footer's app_version) is visible on every page.
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.globals["app_version"] = __version__
+
+
+def set_flash(response: Response, message: str, level: FlashLevel = "info") -> None:
+    """Attach a one-shot message that the next full-page GET shows (see web/flash.py)."""
+    response.set_cookie(
+        key=FLASH_COOKIE,
+        value=encode_flash(message, level),
+        max_age=FLASH_MAX_AGE_SECONDS,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
 
 
 def get_cfg(request: Request) -> AppConfig:
@@ -33,3 +51,8 @@ def find_camera(cfg: AppConfig, name: str) -> CameraConfig | None:
         if cam.name == name:
             return cam
     return None
+
+
+def is_htmx(request: Request) -> bool:
+    """Return True when htmx sent the request (it adds ``HX-Request: true``)."""
+    return request.headers.get("hx-request") == "true"

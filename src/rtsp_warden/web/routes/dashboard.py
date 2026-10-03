@@ -10,18 +10,15 @@ from datetime import datetime, time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from starlette.templating import Jinja2Templates
 
 from ..auth_depends import require_user
-from ..paths import TEMPLATES_DIR
 from ..services.cameras import list_cameras
 from ..services.events import count_events_by_type, list_events
 from ..services.recordings import list_recordings
 from ..services.runtime import get_runtime_status
+from ._common import templates
 
 router = APIRouter()
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -62,7 +59,7 @@ async def dashboard(request: Request, user=Depends(require_user)) -> HTMLRespons
         detections_by_type = {}
         detections_today = 0
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
@@ -73,6 +70,5 @@ async def dashboard(request: Request, user=Depends(require_user)) -> HTMLRespons
             "recent_events": recent_events,
             "detections_today": detections_today,
             "detections_by_type": detections_by_type,
-            "version": status.get("version", "unknown"),
         },
     )

@@ -19,29 +19,36 @@
 </head>
 <body>
   {% block nav %}
-  <nav class="container-fluid">
+  {% set nav_path = request.url.path %}
+  {% set user = request.state.current_user if request.state.current_user else none %}
+  <nav class="container-fluid site-nav">
     <ul>
       <li><strong><a href="/">rtsp-warden</a></strong></li>
     </ul>
     <ul>
-      {% set user = request.state.current_user if request.state.current_user else none %}
       {% if user %}
-      <li><a href="/cameras">Cameras</a></li>
-      <li><a href="/events">Events</a></li>
+      <li><a href="/"{% if nav_path == '/' %} aria-current="page"{% endif %}>Dashboard</a></li>
+      <li><a href="/cameras"{% if nav_path.startswith('/cameras') %} aria-current="page"{% endif %}>Cameras</a></li>
+      <li><a href="/events"{% if nav_path.startswith('/events') %} aria-current="page"{% endif %}>Events</a></li>
       {% if user.role == 'admin' %}
-      <li><a href="/users">Users</a></li>
-      <li><a href="/actions">Actions</a></li>
-      <li><a href="/onvif">ONVIF</a></li>
-      <li><a href="/settings">Settings</a></li>
+      <li><a href="/users"{% if nav_path.startswith('/users') %} aria-current="page"{% endif %}>Users</a></li>
+      <li><a href="/actions"{% if nav_path.startswith('/actions') %} aria-current="page"{% endif %}>Actions</a></li>
+      <li><a href="/onvif"{% if nav_path.startswith('/onvif') %} aria-current="page"{% endif %}>ONVIF</a></li>
+      <li><a href="/settings"{% if nav_path.startswith('/settings') %} aria-current="page"{% endif %}>Settings</a></li>
       {% endif %}
-      <li><a href="/api-tokens">API Tokens</a></li>
+      <li><a href="/health"{% if nav_path.startswith('/health') %} aria-current="page"{% endif %}>Health</a></li>
       <li>
-        <details>
+        <details class="dropdown">
           <summary>{{ user.username }}</summary>
-          <form method="POST" action="/logout">
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
-            <button type="submit" class="secondary outline">Log out</button>
-          </form>
+          <ul dir="rtl">
+            <li><a href="/api-tokens"{% if nav_path.startswith('/api-tokens') %} aria-current="page"{% endif %}>API Tokens</a></li>
+            <li>
+              <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+                <button type="submit" class="secondary outline small">Log out</button>
+              </form>
+            </li>
+          </ul>
         </details>
       </li>
       {% else %}
@@ -52,11 +59,14 @@
   {% endblock %}
 
   <main class="container-fluid">
+    {% include "partials/flash.html" %}
     {% block content %}{% endblock %}
   </main>
 
   <footer class="container-fluid">
-    <small>rtsp-warden v{{ version }}</small>
+    {# app_version is a global of routes._common.templates; the fallback covers route modules
+       that still build their own Jinja2Templates (events, recordings, clips: RW-3 owns them). #}
+    <small>rtsp-warden v{{ app_version | default(request.app.version) }}</small>
   </footer>
 
   <script src="/static/js/warden.js"></script>

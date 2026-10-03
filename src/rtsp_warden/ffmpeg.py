@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -108,6 +109,30 @@ def redact_url(url: str) -> str:
             except Exception:  # pylint: disable=broad-exception-caught
                 return "***"
         return url
+
+
+# scheme://userinfo@ -- greedy to the last "@" of the whitespace-delimited token, so a raw
+# "@", "/", "#" or "?" inside a password is still covered (over-redacting beats leaking).
+# The lookbehind only skips starts inside a run of letters (the run's first letter gives the
+# same match), so a long word costs linear time instead of quadratic backtracking.
+_URL_USERINFO_RE = re.compile(r"(?<![A-Za-z])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)\S*@")
+# Foscam-style CGI query credentials: ...&usr=admin&pwd=secret
+_SECRET_QUERY_RE = re.compile(r"(?P<key>\b(?:pwd|passwd|password|pass)=)[^&\s]*", re.IGNORECASE)
+
+
+def redact_text(text: str) -> str:
+    """Mask credentials anywhere in free text, such as an ffmpeg or ffprobe stderr line.
+
+    ``scheme://user:pass@`` (also ``user@``) becomes ``scheme://***:***@`` and the values
+    of ``pwd=``, ``passwd=``, ``password=`` and ``pass=`` become ``***``.
+
+    Example:
+      "Connection to rtsp://u:p@h/m failed" -> "Connection to rtsp://***:***@h/m failed"
+    """
+    if not text:
+        return text
+    text = _URL_USERINFO_RE.sub(r"\g<scheme>***:***@", text)
+    return _SECRET_QUERY_RE.sub(r"\g<key>***", text)
 
 
 def redact_argv(argv: Iterable[str]) -> str:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+from ...ffmpeg import redact_text
 from ...status_model import redact_rtsp_url
 
 if TYPE_CHECKING:
@@ -18,7 +19,8 @@ if TYPE_CHECKING:
 def live_status(cam_rt: Any, now: float | None = None) -> dict[str, Any]:
     """Summarize a CameraRuntime for display.
 
-    status: running | restarting | failed | idle | waiting (event mode, no detection yet)
+    status: running | degraded (ingest runs, proxy cannot start) | restarting | failed |
+    idle | waiting (event mode, no detection yet)
     """
     now = time.time() if now is None else now
     recorder = getattr(cam_rt, "recorder", None)
@@ -55,12 +57,37 @@ def live_status(cam_rt: Any, now: float | None = None) -> dict[str, Any]:
     if status == "restarting":
         restart_in = int(cam_rt.next_restart_at - now)
 
+    last_error = getattr(cam_rt, "last_error", "") or ""
+    proxy_error = getattr(cam_rt, "proxy_error", "")
+    if status == "running" and isinstance(proxy_error, str) and proxy_error:
+        # The ingest runs but the camera's proxy (MJPEG preview server or MediaMTX)
+        # cannot start, e.g. a taken port: say so instead of a plain "running".
+        status = "degraded"
+        last_error = proxy_error
+
     return {
         "status": status,
         "restart_in": restart_in,
-        "last_error": getattr(cam_rt, "last_error", "") or "",
+        "last_error": redact_text(last_error),
         "last_frame_age": last_frame_age,
     }
+
+
+_STATUS_LABELS: dict[str, str] = {
+    "running": "Running",
+    "degraded": "Proxy down",
+    "failed": "Failed",
+    "idle": "Idle",
+    "waiting": "Waiting for event",
+    "unknown": "Unknown",
+}
+
+
+def status_label(status: str, restart_in: int | None = None) -> str:
+    """Human text for a ``live_status`` value, shown in the badge on cards and the detail page."""
+    if status == "restarting":
+        return f"Restarting in {restart_in}s" if restart_in else "Restarting"
+    return _STATUS_LABELS.get(status, status.capitalize())
 
 
 def _find_runtime(rt: Any, name: str) -> Any | None:
@@ -75,8 +102,8 @@ def list_cameras(cfg: AppConfig, rt: Any = None) -> list[dict[str, Any]]:
 
     Each dict contains:
       name, enabled, record_enabled, proxy_mode, proxy_port, has_proxy,
-      main_url_redacted, sub_url_redacted, status, restart_in, last_error,
-      last_frame_age, stream, bind_host
+      main_url_redacted, sub_url_redacted, status, status_label, restart_in,
+      last_error (credentials masked), last_frame_age, stream, bind_host
 
     When *rt* (the live AppRuntime) is given, status fields come from
     ``live_status``; otherwise status is "unknown".
@@ -104,6 +131,7 @@ def list_cameras(cfg: AppConfig, rt: Any = None) -> list[dict[str, Any]]:
         cam_rt = _find_runtime(rt, cam.name) if rt is not None else None
         if cam_rt is not None:
             row.update(live_status(cam_rt))
+        row["status_label"] = status_label(row["status"], row["restart_in"])
         row["detection"] = camera_badge(rt, cam.name) if cam_rt is not None else None
         cameras.append(row)
     return cameras

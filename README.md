@@ -51,9 +51,12 @@ pip install rtsp-warden
 #    and prints the generated password in its log.
 rtsp-warden install
 
-# 3. Create a starter config
+# 3. Create a starter config, and put the camera login in a .env file next to it
+#    (the template reads ${CAM_USER} / ${CAM_PASS}; percent-encode @ : / ? # %)
 rtsp-warden init-config --out config.yaml
-# Edit it: add your cameras' RTSP URLs
+[ -e .env ] || (umask 077 && printf 'CAM_USER=admin\nCAM_PASS=your-camera-password\n' > .env)
+#    ^ creates .env (mode 600) only if it does not exist; otherwise add the two lines to it
+# Edit config.yaml: set your camera's address and stream path
 
 # 4. Validate
 rtsp-warden doctor -c config.yaml
@@ -62,7 +65,7 @@ rtsp-warden doctor -c config.yaml
 rtsp-warden serve -c config.yaml --web --web-port 8080
 ```
 
-Open **http://127.0.0.1:8080/** and log in with the password from step 2.
+Open **http://127.0.0.1:8080/** and log in with the password from step 2. More cameras can be added from the web UI; see [Adding a camera](#adding-a-camera).
 
 ### Option B: Docker (distroless, recommended)
 
@@ -88,6 +91,59 @@ docker compose logs warden | grep "created admin"   # first-start admin password
 The distroless image is 685 MB. See [docker/README.md](docker/README.md) for the slim alternative, ONVIF/UDP notes, and volume-mounting gotchas.
 
 The example config detects with YOLOX: its model (about 34 MB) is downloaded into `./data/models` on the first frame, so the first start needs internet access. Set `runtime.public_url` in `config/config.yaml` to the address your phone uses (for example `http://nvr.lan:8080`) so links in notifications work. For an NVIDIA GPU, see [GPU (NVIDIA)](#gpu-nvidia).
+
+## Adding a camera
+
+Admins add, edit and delete cameras in the web UI, without a restart. Open **Cameras**, then **Add camera** (`/cameras/new`).
+
+| Field | Notes |
+|---|---|
+| Name | 1 to 32 letters, digits, `-` or `_`, starting with a letter or digit. Must be unique; names that differ only in upper and lower case, or in `-` versus `_`, count as the same name. `new` is reserved. It cannot be changed later: to rename a camera, delete it and add it again. |
+| Host | The camera's IP address or host name. |
+| User name, Password | The camera's login. They are not written to `config.yaml` (see below). |
+| ONVIF port | Filled by **Find stream URLs (ONVIF)**; the ONVIF page (PTZ, presets, events) uses it (default 80). Leave it empty to let the lookup try ports 80, 8080, 888 and 2020. |
+| Main stream | A path such as `/videoMain` or a full `rtsp://` URL without the login; filled by **Find stream URLs (ONVIF)**. Left blank, it becomes `rtsp://<host>:554/`. |
+| Sub stream (optional) | Same format. Without it, the live view and detection use the main stream, and only the main stream is recorded. |
+| Record continuously | Record this camera to disk. |
+
+**Find stream URLs (ONVIF)** asks the camera for its stream URLs (`GetStreamUri`, WS-UsernameToken login) on ports 80, 8080, 888 and 2020 (or only the ONVIF port you typed), waiting at most 3 seconds per port, and uses the first port that answers. The URLs it returns are rewritten to the host you typed, because cameras often report an address you cannot reach. A wrong user name or password stops at the first port that answers and says so; a failed lookup names the ports it tried.
+
+**Test main stream** / **Test sub stream** run `ffprobe` against that stream with a timeout and show the codec, resolution, frame rate and one snapshot. They use `runtime.ffprobe_path` when that is set, otherwise the `ffprobe` next to `runtime.ffmpeg_path`; both Docker images include it. Saving does not require a passing test.
+
+**Save camera** adds the camera to `config.yaml` and starts it. Its MJPEG proxy port is the lowest free port from 9001 up that no other camera uses; the edit page shows it read-only.
+
+### Where the credentials go
+
+The form writes environment references into `config.yaml`, never the login itself:
+
+```yaml
+cameras:
+  - name: front-door
+    main_url: rtsp://${CAM_FRONT_DOOR_USER}:${CAM_FRONT_DOOR_PASS}@192.168.1.60:554/stream1
+    onvif_port: 8080
+    record:
+      enabled: true
+    proxy:
+      enabled: true
+      mode: mjpeg
+      stream: main
+      port: 9002
+```
+
+The variable names are `CAM_`, the camera name upper-cased with `-` turned into `_`, then `_USER` or `_PASS`. Their values are percent-encoded (so a password with `@`, `/`, `#` or `%` works) and saved in the `.env` file next to `config.yaml`, created with mode 0600. `serve`, `doctor` and `status` read that file, then `./.env`, at start; a variable that is already set in the environment (compose `environment:`, systemd `EnvironmentFile=`) wins. That is why **Save camera** refuses a name whose `CAM_<NAME>_USER` / `CAM_<NAME>_PASS` are already set to other values, in that `.env` or in the service environment: choose another name, or remove the old lines first. The repository's `.gitignore` ignores every `.env`.
+
+For a camera you write by hand, use the same pattern: `rtsp://${CAM_USER}:${CAM_PASS}@host:554/path`, with `CAM_USER` and `CAM_PASS` in that `.env` and `@ : / ? # %` percent-encoded in the values.
+
+### Editing and deleting
+
+The camera page has **Edit camera** and **Delete camera** buttons. **Edit camera** (`/cameras/{name}/edit`; the old `/cameras/{name}/settings` page redirects there) changes the main and sub stream URLs (a blank sub stream removes it), the login (blank fields keep the current one), recording on or off, and the ONVIF port. Changing a URL, the login or the recording switch restarts only that camera's ffmpeg. **Delete camera** removes the camera from `config.yaml` and stops it, and drops its `CAM_<NAME>_*` login from the `.env` when no other camera uses it; its recordings and events are kept.
+
+### The config directory must be writable
+
+A save writes `config.yaml`, a `.config.yaml.lock` lock file, a temporary `config.yaml.tmp` and `.env` in the directory that holds `config.yaml`, so that directory must be writable by the user rtsp-warden runs as. The web UI rewrites `config.yaml` with PyYAML, so comments in it are not kept. When the directory is read-only, the page shows an error naming the file instead of saving.
+
+- **Docker:** `docker-compose.yml` mounts `./config` read-write. A bind mount keeps the owner of the host directory, so give the directories to the container user before the first start: `sudo chown -R 65532:65532 config recordings data` for the default distroless image (`1000:1000` for the slim image). Do not mount `config/` read-only (`:ro`).
+- **systemd:** the unit lists `/etc/rtsp-warden` in `ReadWritePaths`, and `packaging/systemd/install.sh` creates it as `0770 root:rtsp-warden` (re-run it on an older install, then restart the service). Logins of cameras added from the web UI land in `/etc/rtsp-warden/.env`; `warden.env` stays the place for everything else.
 
 ## How it fits together
 
@@ -317,6 +373,13 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /login` / `POST /login` | none | Login (rate-limited to 5/min) |
 | `POST /logout` | user | Logout |
 | `GET /cameras` | user | Camera list |
+| `GET /cameras/new` | admin | Add-camera form |
+| `POST /cameras/new/test` | admin | Test main or sub stream: ffprobe plus one snapshot (htmx fragment) |
+| `POST /cameras/new/onvif` | admin | Find stream URLs over ONVIF `GetStreamUri` (htmx fragment) |
+| `POST /cameras` | admin | Save a new camera to `config.yaml` and start it |
+| `GET /cameras/{name}/edit` / `POST` | admin | Edit a camera's stream URLs, login, recording switch and ONVIF port |
+| `POST /cameras/{name}/delete` | admin | Remove a camera from `config.yaml` and stop it (recordings are kept) |
+| `GET /cameras/{name}/status-row` | user | Status row of the camera page (htmx partial, polled every 5 s) |
 | `GET /cameras/{name}` | user | Camera detail: live status, live MJPEG, recent recordings, detector list, zone/sensitivity controls |
 | `GET /cameras/{name}/live.mjpeg` / `snapshot.jpg` | user | Same-origin live MJPEG stream and latest JPEG frame |
 | `GET /cameras/{name}/status` | user | Camera card (htmx partial, auto-refresh) with running / restarting / failed status |
@@ -344,9 +407,12 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /settings` | admin | System settings (read-only display) |
 | `GET /actions`, `POST /actions/{name}/test` | admin | Actions with last run and failure count, and a Test button each; actions are edited in `config.yaml` |
 | `GET /onvif` / `POST /onvif/discover` | admin | ONVIF camera discovery |
-| `GET /onvif/cameras/{name}/ptz` | admin | PTZ control pad (with preset management) |
+| `GET /onvif/cameras/{name}/ptz` | admin | Redirects (303) to `/onvif?camera={name}` |
+| `POST /onvif/cameras/{name}/ptz` | admin | PTZ move or stop (form `direction`, `duration_ms`; htmx fragment) |
+| `GET /onvif/cameras/{name}/presets` | admin | Presets panel (htmx fragment) |
+| `GET /onvif/events` | admin | Event subscription table (htmx fragment) |
 | `POST /onvif/cameras/{name}/events/subscribe` / `unsubscribe` | admin | ONVIF event subscription |
-| `POST /onvif/cameras/{name}/ptz/goto` / `save` / `{preset}/delete` | admin | PTZ preset management |
+| `POST /onvif/cameras/{name}/ptz/goto` / `save` / `delete` | admin | PTZ presets (form field `preset_name`) |
 | `GET /htl/{cam}/{stream}/{start}/{end}.m3u8` | user | Dynamic HLS playlist for a time window |
 | `GET /segments/{cam}/{stream}/{path:path}` | user | Serve a TS segment file |
 | `GET /healthz` / `/status.json` | none | Liveness / full status JSON (always public) |
@@ -500,7 +566,8 @@ Each run is stored in `action_runs` and shown on the event's page and, as last r
 ### ONVIF
 
 - **Discovery:** WS-Discovery UDP multicast to `239.255.255.250:3702`. **Note:** this does not cross Docker bridge networks; use `network_mode: host` for Docker deployments.
-- **PTZ:** absolute_move, continuous_move, stop. Presets are saved in `config.yaml` under `camera.presets`.
+- **Stream URLs:** **Find stream URLs (ONVIF)** on the add-camera form calls `GetStreamUri` (WS-UsernameToken login) on ports 80, 8080, 888 and 2020 and fills in the port that answered as the camera's `onvif_port`. See [Adding a camera](#adding-a-camera).
+- **PTZ:** absolute_move, continuous_move, stop, from the PTZ pad on the ONVIF page. PTZ and event calls go to `http://<host of main_url>:<onvif_port>/onvif/device_service` (`onvif_port` defaults to 80) with the global `onvif.username` / `onvif.password` over HTTP Digest auth. Presets are saved in `config.yaml` under `camera.presets`; a save changes only that camera's `presets` list in the raw YAML, so `${VAR}` references in the file survive.
 - **Events:** pull-point subscription over SOAP, started manually from the ONVIF page. Received events are logged; they are not yet turned into alerts.
 
 ### Clips
@@ -565,7 +632,7 @@ sudo cp your-config.yaml /etc/rtsp-warden/config.yaml
 sudo systemctl enable --now rtsp-warden
 ```
 
-The unit is hardened: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ReadWritePaths` limited to the data directories. See [packaging/systemd/README.md](packaging/systemd/README.md).
+The unit is hardened: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ReadWritePaths` limited to the data and log directories plus `/etc/rtsp-warden` (the web UI saves `config.yaml` and `.env` there). See [packaging/systemd/README.md](packaging/systemd/README.md).
 
 ## Development
 

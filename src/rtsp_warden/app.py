@@ -29,7 +29,7 @@ from .detectors.registry import DEFAULT_ONNX_MODEL, build_detectors_for_camera
 from .detectors.runner import DetectorRunner
 from .detectors.sinks import EventSink
 from .detectors.tracking import Tracker
-from .ffmpeg import ExponentialBackoff
+from .ffmpeg import ExponentialBackoff, redact_text
 from .frame_tap import FrameConsumer, FrameTapDispatcher
 from .proxy.mjpeg import FrameHub, MjpegProxyServer
 from .proxy.rtsp_mediamtx import MediaMTXProxyServer
@@ -74,7 +74,11 @@ class CameraRuntime:
 
 
 def _last_stderr_line(procs: list) -> str:
-    """Return the last non-empty stderr line across ingest processes, or ''."""
+    """Return the last non-empty stderr line across ingest processes, or ''.
+
+    Credentials are masked before the 300-character cut, so a cut cannot leave part
+    of a password behind.
+    """
     for sp in procs:
         proc = getattr(sp, "proc", None)
         if proc is None:
@@ -84,22 +88,19 @@ def _last_stderr_line(procs: list) -> str:
         except Exception:
             continue
         if tail:
-            return tail[-1][:300]
+            return redact_text(tail[-1])[:300]
     return ""
-
-
-# The "user:pass@" of a URL, up to the last "@" before the host (a password may hold "@").
-_USERINFO_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@")
 
 
 def _error_text(exc: BaseException) -> str:
     """One-line description of *exc* for CameraRuntime.last_error (at most 300 chars).
 
-    The text reaches the web UI and the logs, so URL credentials are masked. The message
-    is capped before the regex runs, whose scheme part backtracks quadratically.
+    The text reaches the web UI and the logs, so credentials are masked with
+    ``ffmpeg.redact_text`` (URL userinfo, even with a raw "@" or "/" in the password, and
+    ``pwd=`` style query values). The message is capped at 1000 characters first.
     """
     text = f"{type(exc).__name__}: {exc}"[:1000]
-    return _USERINFO_RE.sub(r"\1***:***@", text)[:300]
+    return redact_text(text)[:300]
 
 
 # A hot-added camera's name becomes a directory (recordings, MediaMTX config), so it must
@@ -1106,7 +1107,7 @@ class AppRuntime:
                         last_err = tail[-1]
 
             # ffmpeg prints the expanded camera URL when it cannot open it: mask the userinfo.
-            shown_err = _USERINFO_RE.sub(r"\1***:***@", last_err[:1000])[:120]
+            shown_err = redact_text(last_err[:1000])[:120]
             table.add_row(
                 rt.camera.name, main_status, sub_status, proxy_status, frame_age, shown_err
             )
