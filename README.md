@@ -16,7 +16,6 @@ A self-hosted Network Video Recorder (NVR) for RTSP cameras. Records continuousl
 - **Zones** are grid-based (toggle cells like your home security app) or polygon ROI; the "block the road" use case
 - **Tuning** per camera: sensitivity (0-100), detection classes, enable/disable per detector
 - **Multi-user** with bcrypt sessions, bearer API tokens, and admin/viewer roles
-- **Timeline** with object-type colored markers (person = red, pet = blue, critter = green, vehicle = orange)
 
 ## Why this and not ZoneMinder / Shinobi / Frigate?
 
@@ -298,13 +297,8 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /cameras/{name}/detection-classes` / `POST` | admin | Per-camera detection class list |
 | `POST /cameras/{name}/detectors/{type}/enabled` | admin | Toggle a detector on/off |
 | `POST /cameras/{name}/reload` | admin | Rebuild that camera's detectors from the in-memory config (no restart, no YAML re-read) |
-| `GET /recordings` | user | Recording list with filter |
-| `GET /recordings/{id}` | user | Recording detail with HLS player + canvas timeline |
 | `GET /events` | user | Event list (auto-refresh every 10s) |
-| `GET /events/{id}` | user | Event detail with "Generate Clip" button |
-| `POST /events/{event_id}/clip` | user | Generate an MP4 clip for the event |
-| `GET /clips/{clip_id}` | user | Clip detail page |
-| `GET /clips/{clip_id}/download` | user | Download the MP4 clip |
+| `GET /events/{id}` | user | Event detail |
 | `GET /users` / `POST /users/new` | admin | User management |
 | `POST /users/{id}/reset-password` / `delete` / `toggle-admin` | admin | User actions |
 | `GET /api-tokens` / `POST` / `POST .../revoke` | user | API token management (bearer) |
@@ -316,7 +310,6 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `POST /onvif/cameras/{name}/ptz/goto` / `save` / `{preset}/delete` | admin | PTZ preset management |
 | `GET /htl/{cam}/{stream}/{start}/{end}.m3u8` | user | Dynamic HLS playlist for a time window |
 | `GET /segments/{cam}/{stream}/{path:path}` | user | Serve a TS segment file |
-| `GET /api/recordings/{id}/timeline` | user | JSON timeline data for the canvas scrubber |
 | `GET /healthz` / `/status.json` | none | Liveness / full status JSON (always public) |
 | `GET /health` / `/health/partial` | user | Health page and its htmx partial |
 | `GET /metrics` | none | Prometheus metrics |
@@ -374,7 +367,7 @@ Notifier types:
 
 ### Clips
 
-Generate an MP4 from the HLS segments around a detection event. Default: 10 seconds before + 10 seconds after. Uses `ffmpeg -f concat -c copy` (no re-encoding, fast). Generated clips live in `clips.output_dir` (default: `{recordings_root}/../clips`) and are tracked in the `clips` table.
+The manual "Generate Clip" button, the `/clips/{id}` pages and the `clips` table were removed by database migration 0003, together with the recordings list, the recording detail page and the timeline, which never showed data (nothing wrote their tables). Recordings stay on disk and are served by `/htl/...` and `/segments/...`. Event clips are cut by rules with `clip: true`; the `clips:` settings set the pre/post-roll.
 
 ## Deployment
 

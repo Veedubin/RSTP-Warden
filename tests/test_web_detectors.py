@@ -7,6 +7,7 @@ and detector-related web endpoints.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from fastapi.testclient import TestClient
 from rtsp_warden.auth import hash_password
 from rtsp_warden.config import load_config
 from rtsp_warden.db.engine import reset_engine
-from rtsp_warden.db.schema import create_admin_user, create_event, ensure_schema
+from rtsp_warden.db.schema import create_admin_user, ensure_schema, insert_event
 from rtsp_warden.web.app import create_app
 from rtsp_warden.web.config import WebSettings
 
@@ -116,7 +117,16 @@ class TestDashboardDetections:
     def test_dashboard_shows_detections_today(self, client_with_detectors: TestClient) -> None:
         """Write 5 events, GET /, verify '5' appears in detections_today stat."""
         for _ in range(5):
-            create_event(event_type="motion", severity="info", message="test detection")
+            insert_event(
+                camera_name="driveway",
+                event_type="motion",
+                label="motion",
+                confidence=1.0,
+                zone="",
+                track_id=None,
+                message="test detection",
+                created_at=datetime.now(timezone.utc),
+            )
 
         r = client_with_detectors.get("/")
         assert r.status_code == 200

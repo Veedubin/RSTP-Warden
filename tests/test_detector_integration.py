@@ -8,6 +8,7 @@ pipeline correctly.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import cv2
@@ -15,7 +16,7 @@ import numpy as np
 import pytest
 
 from rtsp_warden.db.engine import reset_engine
-from rtsp_warden.db.schema import create_event, ensure_schema
+from rtsp_warden.db.schema import ensure_schema, insert_event
 
 
 @pytest.fixture
@@ -27,6 +28,22 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ensure_schema()
     yield tmp_path
     reset_engine()
+
+
+def _insert(
+    event_type: str, message: str, camera: str = "testcam", at: datetime | None = None
+) -> int:
+    """Insert one event row (the 0003 schema has camera_name and no cameras table)."""
+    return insert_event(
+        camera_name=camera,
+        event_type=event_type,
+        label=event_type,
+        confidence=1.0,
+        zone="",
+        track_id=None,
+        message=message,
+        created_at=at or datetime.now(timezone.utc),
+    )
 
 
 def _make_frame(
@@ -70,18 +87,10 @@ class TestMotionEventWrittenToDb:
         """Feed 30 frames where frames 25-30 have a moving white square;
         verify at least one event was written.
         """
-        # Seed a camera row so EventSink can resolve camera_id
-        from rtsp_warden.db.engine import get_session
-        from rtsp_warden.db.models import Camera
         from rtsp_warden.db.schema import count_events as db_count_events
         from rtsp_warden.detectors.builtin.motion import MotionDetector
         from rtsp_warden.detectors.runner import DetectorRunner
         from rtsp_warden.detectors.sinks import EventSink
-
-        with get_session() as session:
-            cam = Camera(name="driveway", main_url="rtsp://x", sub_url="rtsp://x", enabled=True)
-            session.add(cam)
-            session.commit()
 
         sink = EventSink()
         det = MotionDetector(min_area=100, sensitivity=0.8)
@@ -101,21 +110,16 @@ class TestMotionEventWrittenToDb:
         time.sleep(2.0)
         runner.teardown()
 
-        total = db_count_events()
+        total = db_count_events(camera_name="driveway")
         assert total >= 1, f"Expected at least 1 event, got {total}"
 
     def test_event_has_correct_fields(self, tmp_db: Path) -> None:
         """Verify event_type='motion', severity='info', metadata has bbox."""
         from rtsp_warden.db.engine import get_session
-        from rtsp_warden.db.models import Camera, Event
+        from rtsp_warden.db.models import Event
         from rtsp_warden.detectors.builtin.motion import MotionDetector
         from rtsp_warden.detectors.runner import DetectorRunner
         from rtsp_warden.detectors.sinks import EventSink
-
-        with get_session() as session:
-            cam = Camera(name="frontyard", main_url="rtsp://x", sub_url="rtsp://x", enabled=True)
-            session.add(cam)
-            session.commit()
 
         sink = EventSink()
         det = MotionDetector(min_area=100, sensitivity=0.8)
@@ -137,6 +141,7 @@ class TestMotionEventWrittenToDb:
         with get_session() as session:
             event = session.query(Event).filter(Event.event_type == "motion").first()
             assert event is not None, "No motion event found"
+            assert event.camera_name == "frontyard"
             assert event.severity == "info"
             import json
 
@@ -262,35 +267,24 @@ class TestEventService:
         from rtsp_warden.web.services.events import count_events_by_type
 
         for _ in range(3):
-            create_event(event_type="motion", severity="info", message="motion detected")
+            _insert("motion", "motion detected")
         for _ in range(2):
-            create_event(event_type="person", severity="warn", message="person detected")
+            _insert("person", "person detected")
 
         result = count_events_by_type()
         assert result == {"motion": 3, "person": 2}
 
     def test_get_recent_events_orders_desc(self, tmp_db: Path) -> None:
         """Write 3 events with increasing timestamps; verify most recent first."""
-        from rtsp_warden.db.engine import get_session
-        from rtsp_warden.db.models import Camera
         from rtsp_warden.web.services.events import get_recent_events
 
-        # Seed a camera so we can link events
-        with get_session() as session:
-            cam = Camera(name="testcam", main_url="rtsp://x", sub_url="rtsp://x", enabled=True)
-            session.add(cam)
-            session.commit()
-
+        base = datetime.now(timezone.utc)
         for i in range(3):
-            create_event(
-                camera_name="testcam",
-                event_type="motion",
-                severity="info",
-                message=f"event {i}",
-            )
+            _insert("motion", f"event {i}", at=base + timedelta(seconds=i))
 
         events = get_recent_events(limit=10)
         assert len(events) == 3
+        assert events[0]["camera_name"] == "testcam"
         # Most recent first (descending by created_at)
         assert events[0]["message"] == "event 2"
         assert events[2]["message"] == "event 0"

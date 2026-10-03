@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from rtsp_warden.db.engine import reset_engine
-from rtsp_warden.db.models import Camera
 from rtsp_warden.db.schema import ensure_schema, list_events
 from rtsp_warden.detectors.base import Detection
 from rtsp_warden.detectors.builtin.motion import MotionDetector
@@ -228,20 +227,11 @@ def test_detection_has_correct_fields() -> None:
 
 @pytest.fixture
 def motion_db(tmp_path, monkeypatch):
-    """Set up an isolated SQLite DB with schema and a test camera for integration."""
-    from rtsp_warden.db.engine import get_session
-
+    """Set up an isolated SQLite DB with schema for the runner + EventSink integration."""
     db_url = f"sqlite:///{tmp_path}/test_motion.db"
     monkeypatch.setenv("WARDEN_DB_URL", db_url)
     reset_engine()
     ensure_schema()
-
-    with get_session() as session:
-        cam = Camera(
-            name="motioncam", main_url="rtsp://x/main", sub_url="rtsp://x/sub", enabled=True
-        )
-        session.add(cam)
-        session.commit()
 
     yield db_url
     reset_engine()

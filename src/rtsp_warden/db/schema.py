@@ -2,68 +2,146 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import case, update
 from sqlalchemy import func as sa_func
 
 from .engine import get_engine, get_session
-from .models import Camera, Clip, Event, User
+from .models import ActionRun, Event, User
+
+if TYPE_CHECKING:
+    from alembic.config import Config
+    from sqlalchemy.engine import Connection, Engine
 
 log = logging.getLogger(__name__)
 
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent.parent.parent / "alembic.ini"
+# Migrations ship inside the package, so wheels and Docker images (which copy only src/) have them.
+SCRIPT_LOCATION = "rtsp_warden:migrations"
+
+
+def _alembic_config(connection: Connection | None = None) -> Config:
+    """Build the Alembic Config in code.
+
+    No ini file is read, so ``env.py`` never touches logging. With *connection*, migrations run
+    on that connection (``config.attributes["connection"]``) and no URL is serialised, which
+    keeps a Postgres password out of the config and avoids ConfigParser's ``%`` interpolation.
+    """
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", SCRIPT_LOCATION)
+    if connection is not None:
+        cfg.attributes["connection"] = connection
+    return cfg
+
+
+def _backend_name(engine: Engine) -> str:
+    """The SQLAlchemy backend name of *engine* ("sqlite", "postgresql", ...)."""
+    return engine.url.get_backend_name()
+
+
+def _backup_sqlite(engine: Engine, revision: str | None) -> Path | None:
+    """Copy a file-backed SQLite database to ``<db>.bak-<revision>`` before an upgrade.
+
+    SQLite DDL is not transactional and migration 0003 rebuilds the events table, so a failed
+    upgrade can leave a half-migrated file. An existing backup is never overwritten (``.2``,
+    ``.3``, ... are appended). Returns None for other backends and in-memory databases.
+    """
+    database = engine.url.database
+    if _backend_name(engine) != "sqlite" or not database or database == ":memory:":
+        return None
+    source = Path(database)
+    if not source.is_file():
+        return None
+    first = source.with_name(f"{source.name}.bak-{revision or 'base'}")
+    target = first
+    n = 1
+    while target.exists():
+        n += 1
+        target = first.with_name(f"{first.name}.{n}")
+    engine.dispose()  # no pooled connection may hold the file while it is copied
+    shutil.copy2(source, target)
+    return target
 
 
 def ensure_schema() -> None:
-    """Create all tables if they don't exist. Safe to call on every startup.
+    """Bring the database to the newest schema. Safe to call on every start.
 
-    Uses Alembic to apply migrations. If the alembic version table doesn't
-    exist, runs ``alembic upgrade head``. If it does exist, just checks that
-    we're at head (does not auto-upgrade -- that's the operator's job in
-    production).
-
-    For development: also stamps the DB as current if it has tables but no
-    alembic version (i.e., it was created with the old ``create_all`` approach).
+    - Empty database: run every migration.
+    - Tables but no ``alembic_version`` (a pre-Alembic ``create_all`` database): stamp head.
+    - Behind head: copy a SQLite file to ``<db>.bak-<revision>``, then upgrade to head. A
+      database that cannot be copied (PostgreSQL) is upgraded only when ``WARDEN_DB_UPGRADE=1``
+      is set, because an upgrade can drop tables; without it ``SystemExit`` says what to do.
+    - At head: nothing.
+    - At a revision this release does not know (written by a newer release): ``SystemExit``
+      with a message saying what to do. Nothing is changed.
     """
     from alembic import command
-    from alembic.config import Config
     from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from alembic.util import CommandError
     from sqlalchemy import inspect
 
     engine = get_engine()
+    head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
+    tables = set(inspect(engine).get_table_names())
 
-    # Check if alembic version table exists
-    insp = inspect(engine)
-    has_alembic = "alembic_version" in insp.get_table_names()
-    has_any_tables = len(insp.get_table_names()) > 0
+    if not tables:
+        with engine.begin() as conn:
+            command.upgrade(_alembic_config(conn), "head")
+        return
 
-    if not has_alembic and not has_any_tables:
-        # Fresh DB: run migrations
-        cfg = Config(str(_ALEMBIC_INI))
-        cfg.set_main_option(
-            "script_location",
-            str(Path(__file__).resolve().parent.parent.parent.parent / "migrations"),
-        )
-        cfg.set_main_option("sqlalchemy.url", str(engine.url))
-        command.upgrade(cfg, "head")
-    elif not has_alembic and has_any_tables:
-        # DB has tables but no alembic version: this is a legacy create_all DB.
-        # Stamp it as current rather than running migrations (which would fail).
+    if "alembic_version" not in tables:
+        # Legacy create_all DB: stamp it as current rather than running migrations.
         log.info("[db] legacy schema detected; stamping as alembic head")
-        cfg = Config(str(_ALEMBIC_INI))
-        cfg.set_main_option(
-            "script_location",
-            str(Path(__file__).resolve().parent.parent.parent.parent / "migrations"),
+        with engine.begin() as conn:
+            command.stamp(_alembic_config(conn), "head")
+        return
+
+    with engine.connect() as conn:
+        current = MigrationContext.configure(conn).get_current_revision()
+    if current == head:
+        log.info("[db] alembic current revision: %s", current)
+        return
+
+    if current is not None:
+        try:
+            ScriptDirectory.from_config(_alembic_config()).get_revision(current)
+        except CommandError:
+            raise SystemExit(
+                f"[db] the database is at schema revision {current!r}, which this version of "
+                f"rtsp-warden does not know (newest known: {head!r}). It was probably written by "
+                "a newer release: upgrade rtsp-warden, or restore the <db>.bak-<revision> backup "
+                "taken before that upgrade. "
+                f"Database: {engine.url.render_as_string(hide_password=True)}"
+            ) from None
+
+    backup = _backup_sqlite(engine, current)
+    if (
+        backup is None
+        and _backend_name(engine) != "sqlite"
+        and os.environ.get("WARDEN_DB_UPGRADE") != "1"
+    ):
+        raise SystemExit(
+            f"[db] the database is at schema revision {current!r}, this release needs {head!r}, "
+            "and the upgrade drops tables and columns. Take a backup first (for example with "
+            "pg_dump), then start once with WARDEN_DB_UPGRADE=1. "
+            f"Database: {engine.url.render_as_string(hide_password=True)}"
         )
-        cfg.set_main_option("sqlalchemy.url", str(engine.url))
-        command.stamp(cfg, "head")
-    else:
-        # Alembic is initialized; verify we're at head (warn if not)
-        with engine.connect() as conn:
-            mc = MigrationContext.configure(conn)
-            current_rev = mc.get_current_revision()
-            log.info(f"[db] alembic current revision: {current_rev}")
+    log.warning(
+        "[db] upgrading the database schema from %s to %s (backup: %s)",
+        current,
+        head,
+        backup if backup is not None else "none, not a SQLite file",
+    )
+    with engine.begin() as conn:
+        command.upgrade(_alembic_config(conn), "head")
+    log.info("[db] schema upgrade to %s done", head)
 
 
 def create_admin_user(username: str, password_hash: str) -> User:
@@ -185,243 +263,255 @@ def set_user_admin(user_id: int, is_admin: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Event CRUD
+# Datetimes: every DB datetime is written as naive UTC and read back with as_utc().
+# SQLite drops tzinfo (it would store an aware non-UTC value's local wall time), so the
+# helpers below convert before writing.
 # ---------------------------------------------------------------------------
 
 
-def create_event(
-    camera_name: str | None = None,
-    event_type: str = "motion",
-    severity: str = "info",
-    message: str = "",
+def as_utc(dt: datetime | None) -> datetime | None:
+    """Return *dt* as an aware UTC datetime: naive values are UTC, aware ones are converted."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    """Return *dt* in the stored form: naive UTC. A naive input is taken to be UTC already."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+# ---------------------------------------------------------------------------
+# Event CRUD
+# ---------------------------------------------------------------------------
+
+# Columns update_event may set; "metadata" is a dict stored as metadata_json.
+_EVENT_UPDATE_FIELDS = frozenset(
+    {
+        "event_type",
+        "severity",
+        "message",
+        "label",
+        "confidence",
+        "zone",
+        "track_id",
+        "ended_at",
+        "thumbnail_path",
+        "clip_path",
+        "metadata",
+    }
+)
+
+
+def insert_event(
+    *,
+    camera_name: str,
+    event_type: str,
+    label: str | None,
+    confidence: float | None,
+    zone: str,
+    track_id: int | None,
+    message: str,
+    created_at: datetime,
     metadata: dict | None = None,
-) -> Event:
-    """Create a new Event row. Returns the created Event.
-
-    If camera_name is given, looks up the camera_id from the cameras table.
-    If the camera is not found, camera_id is set to None.
-    """
-    camera_id: int | None = None
-    if camera_name is not None:
-        with get_session() as session:
-            cam = session.query(Camera).filter(Camera.name == camera_name).first()
-            if cam is not None:
-                camera_id = cam.id
-
-    metadata_json = json.dumps(metadata, default=str) if metadata else "{}"
-
+    thumbnail_path: str | None = None,
+    severity: str = "info",
+) -> int:
+    """Insert one event row and return its id. *created_at* is stored as naive UTC."""
     with get_session() as session:
         event = Event(
-            camera_id=camera_id,
+            camera_name=camera_name,
             event_type=event_type,
             severity=severity,
-            message=message,
-            metadata_json=metadata_json,
+            label=label,
+            confidence=None if confidence is None else float(confidence),
+            zone=zone,
+            track_id=track_id,
+            message=message[:512],
+            metadata_json=json.dumps(metadata, default=str) if metadata else "{}",
+            created_at=_naive_utc(created_at),
+            thumbnail_path=thumbnail_path,
         )
         session.add(event)
         session.commit()
-        session.refresh(event)
-        # Eagerly load camera relationship so caller can access camera.name
-        if event.camera_id is not None:
-            _ = event.camera  # noqa: F841 — force load before detach
-        session.expunge(event)
+        return int(event.id)
+
+
+def update_event(event_id: int, **fields: Any) -> None:
+    """Set columns on one event (see ``_EVENT_UPDATE_FIELDS``). A missing event is ignored.
+
+    Datetimes are stored as naive UTC, ``confidence`` as a plain float, and ``metadata`` (a
+    dict) replaces ``metadata_json``. An unknown field raises ValueError.
+    """
+    unknown = set(fields) - _EVENT_UPDATE_FIELDS
+    if unknown:
+        raise ValueError(f"update_event: unknown field(s) {sorted(unknown)}")
+    values: dict[str, Any] = {}
+    for key, value in fields.items():
+        if key == "metadata":
+            values["metadata_json"] = json.dumps(value, default=str) if value else "{}"
+        elif isinstance(value, datetime):
+            values[key] = _naive_utc(value)
+        elif key == "confidence" and value is not None:
+            values[key] = float(value)
+        else:
+            values[key] = value
+    if not values:
+        return
+    with get_session() as session:
+        session.execute(update(Event).where(Event.id == event_id).values(**values))
+        session.commit()
+
+
+def close_event(event_id: int, ended_at: datetime, **fields: Any) -> None:
+    """Set ``ended_at`` (and any other ``update_event`` fields) on one event."""
+    update_event(event_id, ended_at=ended_at, **fields)
+
+
+def get_event(event_id: int) -> Event | None:
+    """Fetch one event by id, detached from the session. None if it does not exist."""
+    with get_session() as session:
+        event = session.get(Event, event_id)
+        if event is not None:
+            session.expunge(event)
         return event
 
 
+def _filter_events(
+    query: Any,
+    camera_name: str | None,
+    label: str | None,
+    since: datetime | None,
+    until: datetime | None,
+) -> Any:
+    if camera_name is not None:
+        query = query.filter(Event.camera_name == camera_name)
+    if label is not None:
+        query = query.filter(Event.label == label)
+    if since is not None:
+        query = query.filter(Event.created_at >= _naive_utc(since))
+    if until is not None:
+        query = query.filter(Event.created_at <= _naive_utc(until))
+    return query
+
+
 def list_events(
+    *,
     camera_name: str | None = None,
-    event_type: str | None = None,
-    severity: str | None = None,
-    start: datetime | None = None,
-    end: datetime | None = None,
+    label: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Event]:
-    """Return events filtered by optional criteria, ordered by created_at desc.
-
-    When camera_name is given, JOINs to cameras table to filter.
-    """
+    """Events matching the filters, newest first (ties by id), detached from the session."""
     with get_session() as session:
-        q = session.query(Event)
-
-        if camera_name is not None:
-            q = q.join(Event.camera).filter(Camera.name == camera_name)
-
-        if event_type is not None:
-            q = q.filter(Event.event_type == event_type)
-
-        if severity is not None:
-            q = q.filter(Event.severity == severity)
-
-        if start is not None:
-            q = q.filter(Event.created_at >= start)
-
-        if end is not None:
-            q = q.filter(Event.created_at <= end)
-
-        q = q.order_by(Event.created_at.desc())
-        q = q.offset(offset).limit(limit)
-
-        events = q.all()
-        for e in events:
-            # Eagerly load camera relationship before detaching
-            if e.camera_id is not None:
-                _ = e.camera  # noqa: F841
-            session.expunge(e)
+        query = _filter_events(session.query(Event), camera_name, label, since, until)
+        events = (
+            query.order_by(Event.created_at.desc(), Event.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        for event in events:
+            session.expunge(event)
         return events
 
 
 def count_events(
+    *,
     camera_name: str | None = None,
-    event_type: str | None = None,
-    severity: str | None = None,
-    start: datetime | None = None,
-    end: datetime | None = None,
+    label: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
 ) -> int:
-    """Return the count of events matching the given filters."""
+    """Number of events matching the same filters as ``list_events``."""
     with get_session() as session:
-        q = session.query(sa_func.count(Event.id))
-
-        if camera_name is not None:
-            q = q.join(Event.camera).filter(Camera.name == camera_name)
-
-        if event_type is not None:
-            q = q.filter(Event.event_type == event_type)
-
-        if severity is not None:
-            q = q.filter(Event.severity == severity)
-
-        if start is not None:
-            q = q.filter(Event.created_at >= start)
-
-        if end is not None:
-            q = q.filter(Event.created_at <= end)
-
-        result = q.scalar()
-        return result if result is not None else 0
-
-
-def get_event_by_id(event_id: int) -> Event | None:
-    """Fetch a single Event by primary key. Returns None if not found."""
-    with get_session() as session:
-        event = session.query(Event).filter(Event.id == event_id).first()
-        if event is not None:
-            # Eagerly load camera relationship before detaching
-            if event.camera_id is not None:
-                _ = event.camera  # noqa: F841
-            session.expunge(event)
-        return event
+        query = _filter_events(
+            session.query(sa_func.count(Event.id)), camera_name, label, since, until
+        )
+        return int(query.scalar() or 0)
 
 
 def get_latest_event_for_camera(camera_name: str, since_seconds: int = 0) -> Event | None:
-    """Return the most recent event for *camera_name* within the last *since_seconds*.
+    """Most recent event of *camera_name*, optionally only within the last *since_seconds*.
 
-    Args:
-        camera_name: Camera name to filter by (joined from cameras table).
-        since_seconds: Look-back window in seconds. 0 means "all time".
-
-    Returns:
-        The most recent Event in the window, or None if no events exist.
+    ``since_seconds=0`` means all time. Used by event-mode recording.
     """
     with get_session() as session:
-        q = session.query(Event).join(Event.camera).filter(Camera.name == camera_name)
-
+        query = session.query(Event).filter(Event.camera_name == camera_name)
         if since_seconds > 0:
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=since_seconds)
-            q = q.filter(Event.created_at >= cutoff)
-
-        q = q.order_by(Event.created_at.desc())
-        event = q.first()
-
+            query = query.filter(Event.created_at >= _naive_utc(cutoff))
+        event = query.order_by(Event.created_at.desc(), Event.id.desc()).first()
         if event is not None:
-            if event.camera_id is not None:
-                _ = event.camera  # noqa: F841
             session.expunge(event)
         return event
 
 
 # ---------------------------------------------------------------------------
-# Clip CRUD
+# Action runs
 # ---------------------------------------------------------------------------
 
 
-def create_clip(
-    event_id: int,
-    camera_id: int | None,
-    recording_id: str,
-    path: str,
-    duration_seconds: float = 0.0,
-    size_bytes: int = 0,
-    status: str = "pending",
-    error_message: str | None = None,
-) -> Clip:
-    """Create a new Clip row. Returns the created Clip."""
-    from .engine import get_session
-
+def insert_action_run(*, event_id: int, action_name: str, status: str, error: str | None) -> int:
+    """Record one action attempt for an event; returns the row id. *status* is "ok" or "failed"."""
     with get_session() as session:
-        clip = Clip(
+        run = ActionRun(
             event_id=event_id,
-            camera_id=camera_id,
-            recording_id=recording_id,
-            path=path,
-            duration_seconds=duration_seconds,
-            size_bytes=size_bytes,
+            action_name=action_name,
             status=status,
-            error_message=error_message,
+            error=error,
+            created_at=_naive_utc(datetime.now(timezone.utc)),
         )
-        session.add(clip)
+        session.add(run)
         session.commit()
-        session.refresh(clip)
-        session.expunge(clip)
-        return clip
+        return int(run.id)
 
 
-def get_clip(clip_id: int) -> Clip | None:
-    """Fetch a single Clip by primary key. Returns None if not found."""
-    from .engine import get_session
-
+def list_action_runs(event_id: int) -> list[ActionRun]:
+    """Action runs of one event, oldest first, detached from the session."""
     with get_session() as session:
-        clip = session.query(Clip).filter(Clip.id == clip_id).first()
-        if clip is not None:
-            if clip.event_id is not None:
-                _ = clip.event  # noqa: F841
-            if clip.camera_id is not None:
-                _ = clip.camera  # noqa: F841
-            session.expunge(clip)
-        return clip
-
-
-def list_clips_for_event(event_id: int) -> list[Clip]:
-    """Return all clips for a given event, ordered by created_at desc."""
-    from .engine import get_session
-
-    with get_session() as session:
-        clips = (
-            session.query(Clip)
-            .filter(Clip.event_id == event_id)
-            .order_by(Clip.created_at.desc())
+        runs = (
+            session.query(ActionRun)
+            .filter(ActionRun.event_id == event_id)
+            .order_by(ActionRun.created_at, ActionRun.id)
             .all()
         )
-        for c in clips:
-            session.expunge(c)
-        return clips
+        for run in runs:
+            session.expunge(run)
+        return runs
 
 
-def update_clip_status(clip_id: int, status: str, error_message: str | None = None) -> Clip | None:
-    """Update a clip's status and optionally its error_message.
+def action_stats() -> dict[str, dict]:
+    """Per action name: ``{"last_run": aware UTC datetime, "last_status": str, "failures": int}``.
 
-    Returns the updated Clip or None if clip_id not found.
+    ``failures`` counts every run with status "failed". Names with no runs are absent.
     """
-    from .engine import get_session
-
     with get_session() as session:
-        clip = session.query(Clip).filter(Clip.id == clip_id).first()
-        if clip is None:
-            return None
-        clip.status = status
-        if error_message is not None:
-            clip.error_message = error_message
-        session.commit()
-        session.refresh(clip)
-        session.expunge(clip)
-        return clip
+        rows = (
+            session.query(
+                ActionRun.action_name,
+                sa_func.max(ActionRun.id),
+                sa_func.sum(case((ActionRun.status == "failed", 1), else_=0)),
+            )
+            .group_by(ActionRun.action_name)
+            .all()
+        )
+        last_ids = [row[1] for row in rows]
+        last_runs = {
+            run.id: run for run in session.query(ActionRun).filter(ActionRun.id.in_(last_ids)).all()
+        }
+        stats: dict[str, dict] = {}
+        for name, last_id, failures in rows:
+            last = last_runs[last_id]
+            stats[name] = {
+                "last_run": as_utc(last.created_at),
+                "last_status": last.status,
+                "failures": int(failures or 0),
+            }
+        return stats

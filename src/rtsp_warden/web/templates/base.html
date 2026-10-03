@@ -27,7 +27,6 @@
       {% set user = request.state.current_user if request.state.current_user else none %}
       {% if user %}
       <li><a href="/cameras">Cameras</a></li>
-      <li><a href="/recordings">Recordings</a></li>
       <li><a href="/events">Events</a></li>
       {% if user.role == 'admin' %}
       <li><a href="/users">Users</a></li>

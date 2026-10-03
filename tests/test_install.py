@@ -55,7 +55,7 @@ def test_install_sqlite_writes_db_url(tmp_path: Path) -> None:
 
 
 def test_install_sqlite_creates_schema(tmp_path: Path) -> None:
-    """The sqlite file has all 7 tables after install."""
+    """The sqlite file has the current tables after install."""
     run_install(
         target_dir=tmp_path,
         db_backend="sqlite",
@@ -70,12 +70,11 @@ def test_install_sqlite_creates_schema(tmp_path: Path) -> None:
         "users",
         "sessions",
         "api_tokens",
-        "cameras",
-        "recordings",
         "events",
-        "ingest_health",
+        "action_runs",
+        "alembic_version",
     }
-    assert expected.issubset(tables)
+    assert tables == expected
 
 
 def test_install_sqlite_creates_admin_user(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Tests for Sprint 2 Batch 3: core pages (dashboard, cameras, recordings, events, health).
+"""Tests for Sprint 2 Batch 3: core pages (dashboard, cameras, events, health).
 
 Validates route handlers, service functions, and template rendering
 for all dashboard and CRUD views.
@@ -177,13 +177,6 @@ class TestDashboard:
         assert "front" in r.text
         assert "back" in r.text
 
-    def test_dashboard_shows_no_recordings(self, client_with_config: TestClient) -> None:
-        """Dashboard should show no-recordings message when DB is empty."""
-        r = client_with_config.get("/")
-        assert r.status_code == 200
-        # Either shows "No recordings" or the recordings section
-        assert "No recordings" in r.text or "recordings" in r.text.lower()
-
     def test_dashboard_shows_no_events(self, client_with_config: TestClient) -> None:
         """Dashboard should show no-events message when DB is empty."""
         r = client_with_config.get("/")
@@ -234,31 +227,6 @@ class TestCameras:
         r = client_with_config.get("/cameras/front/status")
         assert r.status_code == 200
         assert "front" in r.text
-
-
-# ---------------------------------------------------------------------------
-# Recordings tests
-# ---------------------------------------------------------------------------
-
-
-class TestRecordings:
-    """Tests for the recordings routes."""
-
-    def test_recordings_list_renders_empty(self, client_with_config: TestClient) -> None:
-        """GET /recordings should render empty list."""
-        r = client_with_config.get("/recordings")
-        assert r.status_code == 200
-        assert "No recordings" in r.text or "recordings" in r.text.lower()
-
-    def test_recordings_list_with_filter(self, client_with_config: TestClient) -> None:
-        """GET /recordings?camera=front should accept filter params."""
-        r = client_with_config.get("/recordings?camera=front")
-        assert r.status_code == 200
-
-    def test_recording_detail_404(self, client_with_config: TestClient) -> None:
-        """GET /recordings/99999 should return 404 for non-existent recording."""
-        r = client_with_config.get("/recordings/99999")
-        assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -378,39 +346,6 @@ class TestCameraService:
 
         cam = get_camera_by_name(cfg, "nonexistent")
         assert cam is None
-
-
-class TestRecordingService:
-    """Tests for the recording listing service."""
-
-    def test_list_recordings_empty(self) -> None:
-        """list_recordings should return empty list when DB has no recordings."""
-        import tempfile
-
-        from rtsp_warden.web.services.recordings import list_recordings
-
-        db_url = f"sqlite:///{tempfile.mktemp(suffix='.db')}"
-        os.environ["WARDEN_DB_URL"] = db_url
-        reset_engine()
-        ensure_schema()
-
-        recordings, total = list_recordings(limit=10)
-        assert recordings == []
-        assert total == 0
-
-    def test_get_recording_by_id_not_found(self) -> None:
-        """get_recording_by_id should return None for non-existent ID."""
-        import tempfile
-
-        from rtsp_warden.web.services.recordings import get_recording_by_id
-
-        db_url = f"sqlite:///{tempfile.mktemp(suffix='.db')}"
-        os.environ["WARDEN_DB_URL"] = db_url
-        reset_engine()
-        ensure_schema()
-
-        result = get_recording_by_id(99999)
-        assert result is None
 
 
 class TestEventService:

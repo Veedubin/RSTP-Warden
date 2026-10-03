@@ -1,0 +1,50 @@
+{# HLS player (hls.js, or native HLS in Safari). Include with `htl_src` set to a playlist URL
+   (.m3u8); the event page uses it for a .ts clip. Extracted from the removed recordings page. #}
+{% if htl_src %}
+<div class="player-container">
+  <video id="player" controls preload="metadata"></video>
+</div>
+<div id="player-error" style="display:none;">
+  <p>Your browser does not support HLS playback. <a href="{{ htl_src }}">Download playlist</a></p>
+</div>
+<script src="/static/js/hls.min.js"></script>
+<script>
+(function() {
+  var video = document.getElementById('player');
+  var src = {{ htl_src | tojson }};
+
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    var hls = new Hls();
+    hls.loadSource(src);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        switch(data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls.recoverMediaError();
+            break;
+          default:
+            hls.destroy();
+            document.getElementById('player-error').style.display = 'block';
+            video.style.display = 'none';
+            break;
+        }
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Native HLS (Safari)
+    video.src = src;
+  } else {
+    document.getElementById('player-error').style.display = 'block';
+    video.style.display = 'none';
+  }
+})();
+</script>
+{% else %}
+<div class="player-container">
+  <p>No video available for playback.</p>
+</div>
+{% endif %}

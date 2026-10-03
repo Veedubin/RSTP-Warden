@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
-
 import pytest
 from sqlalchemy import inspect
 
 from rtsp_warden.db.engine import get_engine, get_session, reset_engine, resolve_db_url
-from rtsp_warden.db.models import Camera, Recording, Session, User
+from rtsp_warden.db.models import Session, User
 from rtsp_warden.db.schema import create_admin_user, ensure_schema, get_user_by_username
 
 
@@ -27,27 +24,26 @@ def test_resolve_db_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert url == "postgresql+psycopg2://user:pass@localhost/db"
 
 
-def test_ensure_schema_creates_all_7_tables(tmp_path: pytest.TestPath) -> None:
-    """inspect(engine).get_table_names() returns all 7 expected tables."""
-    db_url = f"sqlite:///{tmp_path}/schema_test.db"
-    os.environ["WARDEN_DB_URL"] = db_url
+def test_ensure_schema_creates_the_current_tables(
+    tmp_path: pytest.TestPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh DB gets exactly the 0003 tables (cameras/recordings/ingest_health/clips are gone)."""
+    monkeypatch.setenv("WARDEN_DB_URL", f"sqlite:///{tmp_path}/schema_test.db")
     reset_engine()
-    ensure_schema()
+    try:
+        ensure_schema()
+        tables = set(inspect(get_engine()).get_table_names())
+    finally:
+        reset_engine()
 
-    engine = get_engine()
-    inspector = inspect(engine)
-    tables = set(inspector.get_table_names())
-
-    expected = {
+    assert tables == {
         "users",
         "sessions",
         "api_tokens",
-        "cameras",
-        "recordings",
         "events",
-        "ingest_health",
+        "action_runs",
+        "alembic_version",
     }
-    assert expected.issubset(tables), f"Missing tables: {expected - tables}"
 
 
 def test_create_admin_user_succeeds(clean_db: None) -> None:
@@ -88,41 +84,3 @@ def test_user_cascade_deletes_sessions(clean_db: None) -> None:
     with get_session() as s:
         remaining = s.query(Session).filter(Session.token == session_obj.token).first()
         assert remaining is None
-
-
-def test_recording_unique_path_constraint(clean_db: None) -> None:
-    """Creating two recordings with same path fails."""
-    create_admin_user("rec_test", "hash")
-
-    with get_session() as session:
-        cam = Camera(
-            name="test_cam",
-            main_url="rtsp://example.com/main",
-            sub_url="rtsp://example.com/sub",
-        )
-        session.add(cam)
-        session.commit()
-        session.refresh(cam)
-
-        rec1 = Recording(
-            camera_id=cam.id,
-            stream="main",
-            path="/recordings/test.ts",
-            size_bytes=100,
-            start_time=datetime.now(timezone.utc),
-            container="ts",
-        )
-        session.add(rec1)
-        session.commit()
-
-        rec2 = Recording(
-            camera_id=cam.id,
-            stream="main",
-            path="/recordings/test.ts",
-            size_bytes=200,
-            start_time=datetime.now(timezone.utc),
-            container="ts",
-        )
-        session.add(rec2)
-        with pytest.raises(Exception):  # noqa: B017 - integrity error is fine
-            session.commit()

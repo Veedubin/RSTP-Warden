@@ -53,9 +53,12 @@ and creates the first admin user when the users table is empty (`db/bootstrap.py
 so `install` is optional. `config.yaml` strings may reference `${ENV_VAR}`; a missing
 variable is a startup error. The `run` alias and the stdlib `ui` grid were removed.
 
-**Migrations.** Alembic, `migrations/versions/000N_slug.py`, revision ids like
-`0002_clips`. Add a model in `db/models.py` plus a hand-written migration; if it is a
-new table, add it to `EXPECTED_TABLES` in `tests/test_alembic.py`.
+**Migrations.** Alembic, `src/rtsp_warden/migrations/versions/000N_slug.py` (inside the
+package, so wheels and Docker images ship them), revision ids like `0003_detection_events`
+(at most 32 characters). Add a model in `db/models.py` plus a hand-written migration (SQLite
+ALTERs need `op.batch_alter_table`); if it is a new table, add it to `EXPECTED_TABLES` in
+`tests/test_alembic.py`. The repo-root `alembic.ini` is only for the `alembic` CLI
+(`uv run alembic history`); the app builds its Alembic config in code.
 
 **Version bump** touches three places: `pyproject.toml`, `src/rtsp_warden/__init__.py`,
 and the version assertion in `tests/test_admin.py`.
@@ -154,14 +157,17 @@ inner; use `require_user` / `require_admin` from `web/auth_depends.py` on routes
 
 `db/engine.py` resolves `WARDEN_DB_URL` (default SQLite under `$XDG_DATA_HOME`) into
 a process-wide engine; `reset_engine()` is how tests swap databases. `db/schema.py` is
-both the CRUD helper layer and `ensure_schema()`, which runs `alembic upgrade head` on
-an empty DB, stamps legacy `create_all` DBs, and otherwise only logs the revision (it
-never auto-upgrades an existing DB).
+both the CRUD helper layer and `ensure_schema()`, which migrates an empty DB to head,
+stamps legacy `create_all` DBs, upgrades a DB that is behind head (a SQLite file is first
+copied to `<db>.bak-<revision>`; a PostgreSQL DB is upgraded only when `WARDEN_DB_UPGRADE=1`
+is set, after the owner took a `pg_dump`), and exits with a message on a revision it does not know.
+`migrations/env.py` never calls `fileConfig` (that used to wipe the app's logging).
 
-Nothing in the app writes the `cameras` table. `EventSink` therefore stores
-`camera_id = NULL`; the camera name survives only in `Event.message` and metadata,
-and the events list's outer join yields `camera_name = None`. Account for this before
-filtering events by camera.
+Tables: `users`, `sessions`, `api_tokens`, `events`, `action_runs`. Migration 0003 dropped
+the never-written `cameras`, `recordings` and `ingest_health` tables and the `clips` table,
+and backfilled `events.camera_name` from the old message text. Events are keyed by
+`camera_name`. Every DB datetime is written as naive UTC and read back through
+`schema.as_utc()` (SQLite drops tzinfo).
 
 ### Alerts and ONVIF
 

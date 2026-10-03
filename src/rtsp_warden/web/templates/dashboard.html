@@ -59,28 +59,6 @@
 </article>
 {% endif %}
 
-{# Recent recordings #}
-<h2>Recent recordings</h2>
-{% if recent_recordings %}
-<table>
-  <thead>
-    <tr><th>Time</th><th>Camera</th><th>Stream</th><th>Size</th></tr>
-  </thead>
-  <tbody>
-    {% for rec in recent_recordings %}
-    <tr>
-      <td>{{ rec.start_time.strftime('%Y-%m-%d %H:%M') if rec.start_time else '-' }}</td>
-      <td>{{ rec.camera_name }}</td>
-      <td>{{ rec.stream }}</td>
-      <td>{{ rec.size_bytes }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p><small>No recordings yet.</small></p>
-{% endif %}
-
 {# Recent events #}
 <h2>Recent events</h2>
 {% if recent_events %}

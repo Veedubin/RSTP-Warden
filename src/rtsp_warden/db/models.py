@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -72,55 +73,13 @@ class ApiToken(Base):
     user: Mapped[User] = relationship("User", back_populates="api_tokens", lazy="joined")
 
 
-class Camera(Base):
-    __tablename__ = "cameras"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    main_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    sub_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    config_json: Mapped[str] = mapped_column(
-        Text, nullable=False, default="{}"
-    )  # JSON blob for per-camera overrides
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    recordings: Mapped[list[Recording]] = relationship(
-        "Recording", back_populates="camera", cascade="all, delete-orphan"
-    )
-    events: Mapped[list[Event]] = relationship("Event", back_populates="camera")
-    ingest_health: Mapped[list[IngestHealth]] = relationship(
-        "IngestHealth", back_populates="camera", cascade="all, delete-orphan"
-    )
-
-
-class Recording(Base):
-    __tablename__ = "recordings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    camera_id: Mapped[int] = mapped_column(
-        ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    stream: Mapped[str] = mapped_column(String(8), nullable=False)  # "main" | "sub"
-    path: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    start_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    container: Mapped[str] = mapped_column(String(8), nullable=False, default="ts")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    camera: Mapped[Camera] = relationship("Camera", back_populates="recordings")
-
-
 class Event(Base):
+    """One detection event. Object events span a visit (created_at .. ended_at)."""
+
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    camera_id: Mapped[int | None] = mapped_column(
-        ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    camera_name: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     event_type: Mapped[str] = mapped_column(
         String(32), nullable=False, index=True
     )  # motion, person, vehicle, ingest_lost, ...
@@ -132,52 +91,28 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
-
-    camera: Mapped[Camera | None] = relationship("Camera", back_populates="events")
-
-
-class IngestHealth(Base):
-    __tablename__ = "ingest_health"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    camera_id: Mapped[int] = mapped_column(
-        ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    stream: Mapped[str] = mapped_column(String(8), nullable=False)
-    last_frame_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_segment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    ingest_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    mjpeg_clients: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    camera: Mapped[Camera] = relationship("Camera", back_populates="ingest_health")
+    label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    zone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    track_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Relative to the camera's record.output_dir, e.g. "front/thumbnails/12.jpg".
+    thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    clip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
 
-class Clip(Base):
-    """Generated MP4 clip from HLS segments around an event."""
+class ActionRun(Base):
+    """One attempt to run one action (ntfy, webhook, apprise) for one event."""
 
-    __tablename__ = "clips"
+    __tablename__ = "action_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(
         ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    camera_id: Mapped[int | None] = mapped_column(
-        ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True
-    )
-    recording_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    path: Mapped[str] = mapped_column(String(1024), nullable=False)
-    duration_seconds: Mapped[float] = mapped_column(nullable=False, default=0.0)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    action_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # "ok" | "failed"
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="pending"
-    )  # "pending" | "ready" | "failed"
-    error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-
-    event: Mapped[Event] = relationship("Event")
-    camera: Mapped[Camera | None] = relationship("Camera")
