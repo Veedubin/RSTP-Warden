@@ -81,11 +81,12 @@ class StreamRecordConfig(BaseModel):
 
 
 class RetentionConfig(BaseModel):
-    """Delete old segments and/or cap total size per camera.
+    """Delete old files and/or cap total size per camera (``<record.output_dir>/<camera>``).
 
     Notes:
-      * keep_last_n is always honored first (newest N files are kept).
-      * max_days and max_gb are applied to the remaining files.
+      * keep_last_n protects the newest N recorded segments (files in ``main/`` and ``sub/``);
+        event thumbnails and clips never count toward it.
+      * max_days and max_gb apply to every unprotected file: segments, thumbnails and clips.
     """
 
     max_days: int | None = None

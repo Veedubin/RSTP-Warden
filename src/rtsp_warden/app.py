@@ -172,14 +172,15 @@ class AppRuntime:
             else:
                 raise SystemExit(f"Unsupported proxy mode: {cam.proxy.mode}")
 
-        retention = None
-        if cam.record.enabled:
-            effective_retention = resolve_retention(cam, self.cfg.retention)
-            retention = RetentionManager(
-                camera_name=cam.name,
-                camera_root=cam.record.output_dir / cam.name,
-                cfg=effective_retention,
-            )
+        # Every camera gets a RetentionManager, recording or not: event thumbnails live
+        # under <record.output_dir>/<camera>/thumbnails/ either way (ruling R20). With
+        # recording off it sweeps only thumbnails/ and clips/, never old segments.
+        retention = RetentionManager(
+            camera_name=cam.name,
+            camera_root=cam.record.output_dir / cam.name,
+            cfg=resolve_retention(cam, self.cfg.retention),
+            only_subdirs=None if cam.record.enabled else ("thumbnails", "clips"),
+        )
 
         rec_backoff = ExponentialBackoff(
             min_s=self.cfg.runtime.restart_backoff_min_s,

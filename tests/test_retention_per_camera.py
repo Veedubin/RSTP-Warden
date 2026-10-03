@@ -440,3 +440,156 @@ class TestCameraRetentionWebRoute:
             follow_redirects=False,
         )
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Thumbnails and clips under the camera root (spec 9.2, ruling R20)
+# ---------------------------------------------------------------------------
+
+
+def _aged(path: Path, days: float, size: int = 1000) -> Path:
+    """Write *size* bytes to *path* with an mtime *days* in the past."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x00" * size)
+    old = time.time() - days * 86400
+    os.utime(path, (old, old))
+    return path
+
+
+class TestRetentionSubdirs:
+    """keep_last_n protects recorded segments only; thumbnails/ and clips/ are age/size swept."""
+
+    def test_keep_last_n_counts_only_segments(self, tmp_path: Path) -> None:
+        root = tmp_path / "yard"
+        segments = [
+            _aged(root / "main" / "yard_main_20261001_120000.ts", 3.0),
+            _aged(root / "main" / "yard_main_20261001_120500.ts", 3.0),
+            _aged(root / "sub" / "yard_sub_20261001_120000.ts", 3.0),
+        ]
+        newer = [
+            _aged(root / "thumbnails" / "1.jpg", 2.0),
+            _aged(root / "thumbnails" / "2.jpg", 2.0),
+            _aged(root / "clips" / "1.mp4", 2.0),
+        ]
+        mgr = RetentionManager(
+            camera_name="yard", camera_root=root, cfg=RetentionConfig(max_days=1, keep_last_n=3)
+        )
+        mgr.run()
+
+        assert all(p.exists() for p in segments)
+        assert not any(p.exists() for p in newer)
+
+    def test_thumbnails_and_clips_follow_max_days(self, tmp_path: Path) -> None:
+        root = tmp_path / "yard"
+        old_thumb = _aged(root / "thumbnails" / "1.jpg", 3.0)
+        old_clip = _aged(root / "clips" / "1.ts", 3.0)
+        new_thumb = _aged(root / "thumbnails" / "2.jpg", 0.0)
+        new_clip = _aged(root / "clips" / "2.mp4", 0.0)
+        mgr = RetentionManager(
+            camera_name="yard", camera_root=root, cfg=RetentionConfig(max_days=1)
+        )
+        mgr.run()
+
+        assert not old_thumb.exists() and not old_clip.exists()
+        assert new_thumb.exists() and new_clip.exists()
+
+    def test_max_gb_counts_thumbnails_and_clips(self, tmp_path: Path) -> None:
+        root = tmp_path / "yard"
+        oldest_clip = _aged(root / "clips" / "1.mp4", 2.0, size=1000)
+        segment = _aged(root / "main" / "yard_main_20261002_120000.ts", 0.0, size=1000)
+        # 1e-6 GiB is 1073 bytes: one of the two 1000-byte files has to go, the oldest first.
+        mgr = RetentionManager(
+            camera_name="yard", camera_root=root, cfg=RetentionConfig(max_gb=1e-6)
+        )
+        mgr.run()
+
+        assert not oldest_clip.exists()
+        assert segment.exists()
+
+    def test_empty_thumbnails_and_clips_dirs_are_never_pruned(self, tmp_path: Path) -> None:
+        root = tmp_path / "yard"
+        _aged(root / "thumbnails" / "1.jpg", 3.0)
+        _aged(root / "clips" / "1.mp4", 3.0)
+        _aged(root / "sub" / "yard_sub_20261001_120000.ts", 3.0)
+        mgr = RetentionManager(
+            camera_name="yard", camera_root=root, cfg=RetentionConfig(max_days=1)
+        )
+        mgr.run()
+
+        assert (root / "thumbnails").is_dir()
+        assert (root / "clips").is_dir()
+        assert not (root / "sub").exists()  # other empty directories are still pruned
+
+
+class TestRetentionForEveryCamera:
+    """AppRuntime builds a RetentionManager for record-disabled cameras too (ruling R20)."""
+
+    def test_record_disabled_camera_gets_a_retention_manager(self, tmp_path: Path) -> None:
+        import io
+
+        from rich.console import Console
+
+        from rtsp_warden.app import AppRuntime
+        from rtsp_warden.config import AppConfig
+
+        cam = CameraConfig(
+            name="porch",
+            main_url="rtsp://u:p@h/m",
+            record={"enabled": False, "output_dir": str(tmp_path / "rec")},
+            proxy={"enabled": False},
+            retention=RetentionConfig(max_days=3),
+        )
+        runtime = AppRuntime(cfg=AppConfig(cameras=[cam]), console=Console(file=io.StringIO()))
+        runtime.build()
+
+        retention = runtime.cameras[0].retention
+        assert isinstance(retention, RetentionManager)
+        assert retention.camera_root == tmp_path / "rec" / "porch"
+        assert retention.cfg.max_days == 3
+        # Recording is off: only derived media is swept, never segments a user kept.
+        assert retention.only_subdirs == ("thumbnails", "clips")
+
+    def test_recording_camera_sweeps_its_whole_root(self, tmp_path: Path) -> None:
+        import io
+
+        from rich.console import Console
+
+        from rtsp_warden.app import AppRuntime
+        from rtsp_warden.config import AppConfig
+
+        cam = CameraConfig(
+            name="yard",
+            main_url="rtsp://u:p@h/m",
+            record={"enabled": True, "output_dir": str(tmp_path / "rec")},
+            proxy={"enabled": False},
+        )
+        runtime = AppRuntime(cfg=AppConfig(cameras=[cam]), console=Console(file=io.StringIO()))
+        runtime.build()
+
+        retention = runtime.cameras[0].retention
+        assert isinstance(retention, RetentionManager)
+        assert retention.only_subdirs is None
+
+    def test_record_disabled_camera_keeps_old_segments(self, tmp_path: Path) -> None:
+        """Segments left from when recording was on are never swept once it is off; the
+        thumbnails next to them are."""
+        root = tmp_path / "rec" / "porch"
+        old = time.time() - 30 * 86400
+        segment = root / "main" / "old.ts"
+        thumb = root / "thumbnails" / "1.jpg"
+        for path in (segment, thumb):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x" * 10)
+            os.utime(path, (old, old))
+
+        manager = RetentionManager(
+            camera_name="porch",
+            camera_root=root,
+            cfg=RetentionConfig(max_days=3),
+            only_subdirs=("thumbnails", "clips"),
+        )
+        manager.run()
+
+        assert segment.exists()
+        assert not thumb.exists()
+        assert (root / "thumbnails").is_dir()

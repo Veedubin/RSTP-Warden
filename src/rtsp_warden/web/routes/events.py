@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from starlette.templating import Jinja2Templates
 
-from ...config import AppConfig
 from ..auth_depends import require_user
 from ..paths import TEMPLATES_DIR
 from ..services.events import get_event_by_id, list_events
@@ -23,23 +22,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/events")
 
 _templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-def clip_stream_and_chunk(cfg: AppConfig | None, camera_name: str) -> tuple[str, float]:
-    """Pick the stream to cut clips from and its segment length.
-
-    The sub stream is smaller, so it is preferred when the camera has one and
-    records it; otherwise the main stream. Falls back to main / 300s when the
-    camera is unknown.
-    """
-    cam = None
-    if cfg is not None:
-        cam = next((c for c in cfg.cameras if c.name == camera_name), None)
-    if cam is None:
-        return "main", 300.0
-    if cam.sub_url and cam.record.sub.enabled:
-        return "sub", float(cam.record.sub.chunk_seconds)
-    return "main", float(cam.record.main.chunk_seconds)
 
 
 @router.get("", response_class=HTMLResponse)

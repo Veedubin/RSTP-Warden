@@ -1,22 +1,30 @@
-"""Clip generation from HLS segment detection events.
+"""Event clips cut from the recorded ``.ts`` segments (spec 8.4; rulings R8 and R20).
 
-Given an event (with camera_id, recording_id, created_at), finds the
-HLS segments that overlap the time window
-[created_at - pre_seconds, created_at + post_seconds], concatenates
-them via the ffmpeg concat demuxer, and produces a single MP4 clip.
+A clip covers ``[started_at - pre_seconds, ended_at + post_seconds]``, capped at
+``max_duration`` seconds from its start. It is cut from the camera's segments
+``<camera_root>/<stream>/<camera>_<stream>_YYYYMMDD_HHMMSS.ts`` in two ffmpeg runs:
+
+1. the concat demuxer with input-side ``-ss <offset> -t <duration>`` and ``-c copy``
+   writes ``<camera_root>/clips/<event_id>.ts``;
+2. a remux of that file writes ``<camera_root>/clips/<event_id>.mp4`` with
+   ``-movflags +faststart``, and the ``.ts`` is deleted.
+
+When the remux fails, the ``.ts`` from step 1 is kept and returned instead. Every ffmpeg
+argv ends with its output path. ``subprocess.run`` is looked up at call time, so tests
+patch it.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from re import compile as re_compile
+from typing import Any
 
-from .config import ClipsConfig
+from .config import CameraConfig
 
 log = logging.getLogger(__name__)
 
@@ -24,304 +32,245 @@ log = logging.getLogger(__name__)
 # A bare timestamp is accepted too, for files produced by older builds.
 _SEGMENT_RE = re_compile(r"^(?:.+_)?(\d{8}_\d{6})\.ts$")
 
-# Default segment duration in seconds when m3u8 parsing is unavailable.
-_DEFAULT_SEGMENT_DURATION = 4.0
+# The segment muxer cuts on the first keyframe after chunk_seconds, so a segment runs a
+# little long. A segment is taken to end where the next one starts, but never later than
+# chunk_seconds + SEGMENT_OVERRUN_S after its own start (a gap in the recording).
+SEGMENT_OVERRUN_S = 10.0
+
+# Upper bound for each ffmpeg run. Both runs are stream copies (seconds of I/O).
+CLIP_FFMPEG_TIMEOUT_S = 120
 
 
-class ClipError(Exception):
-    """Raised when clip generation fails."""
+def _to_utc(dt: datetime) -> datetime:
+    """Aware UTC datetime. A naive value is taken to be UTC (SQLite returns naive UTC)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
-@dataclass(slots=True)
-class ClipInfo:
-    """Metadata about a generated clip (not persisted; used as return type)."""
+def clip_stream_and_chunk(cam: CameraConfig) -> tuple[str, int]:
+    """Pick the stream to cut clips from and its segment length in seconds.
 
-    path: Path
-    duration_seconds: float
-    size_bytes: int
-
-
-class ClipGenerator:
-    """Generate downloadable MP4 clips from HLS segments around events.
-
-    Args:
-        cfg: ClipsConfig with pre/post seconds, output directory, etc.
-        recordings_dir: Base recordings directory (from RecordConfig.output_dir).
-        ffmpeg_path: Path to ffmpeg binary.
+    The sub stream is smaller, so it wins when the camera has a ``sub_url`` and records it
+    as ``.ts``. Otherwise the main stream. A camera that records nothing still gets
+    ``("main", chunk)``; ``build_event_clip`` then finds no segments and returns None.
     """
+    sub = cam.record.sub
+    if cam.sub_url and sub.enabled and sub.container == "ts":
+        return "sub", int(sub.chunk_seconds)
+    return "main", int(cam.record.main.chunk_seconds)
 
-    def __init__(
-        self,
-        cfg: ClipsConfig,
-        recordings_dir: Path,
-        ffmpeg_path: str = "ffmpeg",
-    ) -> None:
-        self._cfg = cfg
-        self._recordings_dir = recordings_dir
-        self._ffmpeg_path = ffmpeg_path
 
-    def find_segments(
-        self,
-        camera_name: str,
-        stream: str,
-        start_time: datetime,
-        end_time: datetime,
-        segment_duration: float = _DEFAULT_SEGMENT_DURATION,
-    ) -> list[Path]:
-        """Find HLS .ts segment files whose timestamps overlap [start_time, end_time].
+def clip_rel_path(camera: str, clip_file: Path) -> str:
+    """Clip path relative to ``record.output_dir``, as stored in ``events.clip_path``."""
+    return f"{camera}/clips/{clip_file.name}"
 
-        Segments are named {camera}_{stream}_%Y%m%d_%H%M%S.ts. We parse the filename to get
-        the segment start time, then check overlap with the requested window.
-        Each segment extends for segment_duration seconds.
 
-        Args:
-            camera_name: Camera directory name.
-            stream: Stream subdirectory (e.g., "main" or "sub").
-            start_time: Start of the time window (inclusive).
-            end_time: End of the time window (exclusive).
-            segment_duration: Duration of each segment in seconds (default 4s).
+def select_segments(
+    camera_root: Path,
+    stream: str,
+    start: datetime,
+    end: datetime,
+    chunk_seconds: int,
+) -> list[tuple[Path, datetime]]:
+    """Return ``(path, segment start)`` for every segment overlapping ``[start, end)``.
 
-        Returns:
-            Sorted list of Path objects for overlapping segments.
-        """
-        seg_dir = self._recordings_dir / camera_name / stream
-        if not seg_dir.is_dir():
-            log.warning("[clips] segment directory not found: %s", seg_dir)
-            return []
+    ``start``/``end`` are aware datetimes (naive values are read as UTC). A segment's start
+    comes from its file name, which ffmpeg writes in local time. Its end is the next
+    segment's start, capped at ``chunk_seconds + SEGMENT_OVERRUN_S``. The result is sorted
+    by start time; returned starts are aware UTC.
+    """
+    seg_dir = camera_root / stream
+    if not seg_dir.is_dir():
+        return []
+    start_utc = _to_utc(start)
+    end_utc = _to_utc(end)
 
-        segments: list[tuple[datetime, Path]] = []
-        for entry in seg_dir.iterdir():
-            m = _SEGMENT_RE.match(entry.name)
-            if not m:
-                continue
-            try:
-                # ffmpeg's -strftime names segments in the process's local time zone.
-                seg_start = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").astimezone()
-            except ValueError:
-                continue
-
-            seg_end = seg_start + __import__("datetime").timedelta(seconds=segment_duration)
-
-            # Check overlap: seg_start < end_time AND seg_end > start_time
-            if seg_start < end_time and seg_end > start_time:
-                segments.append((seg_start, entry))
-
-        # Sort by start time and return paths only
-        segments.sort(key=lambda t: t[0])
-        return [p for _, p in segments]
-
-    def _parse_m3u8_durations(self, m3u8_path: Path) -> dict[str, float]:
-        """Parse an m3u8 playlist file to extract segment durations.
-
-        Returns a dict mapping segment filename to duration in seconds.
-        Falls back to empty dict if the file cannot be parsed.
-        """
-        durations: dict[str, float] = {}
-        if not m3u8_path.is_file():
-            return durations
-
+    found: list[tuple[datetime, Path]] = []
+    for entry in seg_dir.iterdir():
+        m = _SEGMENT_RE.match(entry.name)
+        if not m or not entry.is_file():
+            continue
         try:
-            lines = m3u8_path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return durations
+            # Naive local wall time -> aware UTC (astimezone presumes the local zone).
+            seg_start = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").astimezone(timezone.utc)
+        except ValueError:
+            continue
+        found.append((seg_start, entry))
+    found.sort(key=lambda item: item[0])
 
-        current_duration: float | None = None
-        for line in lines:
-            line = line.strip()
-            if line.startswith("#EXTINF:"):
-                try:
-                    dur_str = line[len("#EXTINF:") :]
-                    # EXTINF can be "duration,title" format
-                    dur_str = dur_str.split(",")[0].strip()
-                    current_duration = float(dur_str)
-                except (ValueError, IndexError):
-                    current_duration = None
-            elif line and not line.startswith("#") and current_duration is not None:
-                # This is a segment filename
-                durations[os.path.basename(line)] = current_duration
-                current_duration = None
+    longest = timedelta(seconds=chunk_seconds + SEGMENT_OVERRUN_S)
+    selected: list[tuple[Path, datetime]] = []
+    for i, (seg_start, path) in enumerate(found):
+        seg_end = seg_start + longest
+        if i + 1 < len(found):
+            seg_end = min(seg_end, found[i + 1][0])
+        if seg_start < end_utc and seg_end > start_utc:
+            selected.append((path, seg_start))
+    return selected
 
-        return durations
 
-    def _hls_time_to_datetime(
-        self,
-        recording_dir: Path,
-        segment_duration: float = _DEFAULT_SEGMENT_DURATION,
-    ) -> dict[str, datetime]:
-        """Parse segment filenames to estimate start times.
+def _concat_list(paths: list[Path]) -> str:
+    """Concat-demuxer list: absolute paths (ffmpeg resolves relative ones against the
+    list's own directory), single quotes escaped as ``'\\''``."""
+    lines = []
+    for p in paths:
+        quoted = str(p.absolute()).replace("'", "'\\''")
+        lines.append(f"file '{quoted}'")
+    return "\n".join(lines) + "\n"
 
-        Returns a dict mapping segment filename to its estimated start datetime.
-        Also attempts to read m3u8 for more accurate durations.
-        """
-        result: dict[str, datetime] = {}
 
-        if not recording_dir.is_dir():
-            return result
+def _unlink(p: Path) -> None:
+    try:
+        p.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning("[clips] could not delete %s: %s", p, exc)
 
-        for entry in recording_dir.iterdir():
-            m = _SEGMENT_RE.match(entry.name)
-            if not m:
-                continue
-            try:
-                seg_start = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(
-                    tzinfo=timezone.utc
-                )
-                result[entry.name] = seg_start
-            except ValueError:
-                continue
 
-        return result
+def _nonempty(p: Path) -> bool:
+    try:
+        return p.stat().st_size > 0
+    except OSError:
+        return False
 
-    def _build_ffmpeg_concat_cmd(self, segment_paths: list[Path], output_path: Path) -> list[str]:
-        """Build ffmpeg command to concat segments into a single mp4.
 
-        Uses the concat demuxer with stream copy (no re-encoding).
-        """
-        return [
-            self._ffmpeg_path,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(output_path.parent / "concat_list.txt"),
-            "-c",
-            "copy",
-            "-an",
-            str(output_path),
-        ]
-
-    def _write_concat_list(self, segment_paths: list[Path], concat_list_path: Path) -> None:
-        """Write the ffmpeg concat list file.
-
-        Each line: file '/absolute/path/to/segment.ts'
-        """
-        lines = []
-        for seg_path in segment_paths:
-            lines.append(f"file '{seg_path}'")
-        concat_list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    def generate(
-        self,
-        camera_name: str,
-        stream: str,
-        event_start: datetime,
-        event_id: int,
-        pre_seconds: float | None = None,
-        post_seconds: float | None = None,
-        segment_duration: float | None = None,
-    ) -> Path:
-        """Generate an MP4 clip for an event.
-
-        Args:
-            camera_name: Camera name for finding recording segments.
-            stream: Stream identifier (e.g., "main" or "sub").
-            event_start: Event timestamp (used to compute the clip window).
-            event_id: Event ID (used in output filename).
-            pre_seconds: Seconds before event to include (default from config).
-            post_seconds: Seconds after event to include (default from config).
-            segment_duration: Length of the recorder's segments (record.<stream>.chunk_seconds).
-
-        Returns:
-            Path to the generated clip file.
-
-        Raises:
-            ClipError: If no segments found or ffmpeg fails.
-        """
-        pre = pre_seconds if pre_seconds is not None else self._cfg.pre_seconds
-        post = post_seconds if post_seconds is not None else self._cfg.post_seconds
-
-        start_time = event_start - __import__("datetime").timedelta(seconds=pre)
-        end_time = event_start + __import__("datetime").timedelta(seconds=post)
-
-        # Cap duration
-        max_dur = self._cfg.max_duration
-        actual_dur = (end_time - start_time).total_seconds()
-        if actual_dur > max_dur:
-            end_time = start_time + __import__("datetime").timedelta(seconds=max_dur)
-
-        # Find overlapping segments
-        segments = self.find_segments(
-            camera_name,
-            stream,
-            start_time,
-            end_time,
-            segment_duration=segment_duration or _DEFAULT_SEGMENT_DURATION,
+def _run_ffmpeg(run: Callable[..., Any], cmd: list[str], *, event_id: int, step: str) -> bool:
+    """Run one ffmpeg command. True on exit code 0; failures are logged, never raised."""
+    try:
+        result = run(cmd, capture_output=True, timeout=CLIP_FFMPEG_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "[clips] event %d: ffmpeg %s timed out after %ds", event_id, step, CLIP_FFMPEG_TIMEOUT_S
         )
-        if not segments:
-            raise ClipError(
-                f"No HLS segments found for camera={camera_name} stream={stream} "
-                f"in window [{start_time}, {end_time})"
-            )
+        return False
+    except OSError as exc:
+        log.warning("[clips] event %d: cannot run ffmpeg for %s: %s", event_id, step, exc)
+        return False
+    if result.returncode != 0:
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()[-500:]
+        log.warning(
+            "[clips] event %d: ffmpeg %s exited %d: %s", event_id, step, result.returncode, stderr
+        )
+        return False
+    return True
 
-        # Determine output path
-        output_dir = Path(self._cfg.output_dir.format(recordings_root=str(self._recordings_dir)))
-        output_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp_str = event_start.strftime("%Y%m%d_%H%M%S")
-        output_path = output_dir / f"{camera_name}_{event_id}_{timestamp_str}.mp4"
+def build_event_clip(
+    *,
+    camera_root: Path,
+    stream: str,
+    chunk_seconds: int,
+    started_at: datetime,
+    ended_at: datetime,
+    pre_seconds: float,
+    post_seconds: float,
+    max_duration: float,
+    event_id: int,
+    ffmpeg_path: str,
+    runner: Callable[..., Any] | None = None,
+) -> Path | None:
+    """Cut the clip for one closed event and return its path, or None when none was made.
 
-        # Write concat list and run ffmpeg
-        concat_list_path = output_dir / "concat_list.txt"
-        try:
-            self._write_concat_list(segments, concat_list_path)
-            cmd = self._build_ffmpeg_concat_cmd(segments, output_path)
+    ``camera_root`` is ``<record.output_dir>/<camera>``. ``started_at``/``ended_at`` are the
+    event bounds (aware, or naive UTC). The clip is ``<camera_root>/clips/<event_id>.mp4``,
+    or ``<event_id>.ts`` when the MP4 remux fails. ``runner`` defaults to
+    ``subprocess.run``, looked up at call time. Never raises for missing segments, ffmpeg
+    failures or file-system errors; it logs them and returns None.
+    """
+    run = runner if runner is not None else subprocess.run
 
-            log.info("[clips] generating clip: %s", " ".join(cmd))
-            result = subprocess.run(
-                cmd,
-                timeout=120,
-                capture_output=True,
-            )
+    window_start = _to_utc(started_at) - timedelta(seconds=pre_seconds)
+    window_end = _to_utc(ended_at) + timedelta(seconds=post_seconds)
+    if (window_end - window_start).total_seconds() > max_duration:
+        window_end = window_start + timedelta(seconds=max_duration)
 
-            if result.returncode != 0:
-                stderr_text = result.stderr.decode("utf-8", errors="replace")[:2000]
-                log.error("[clips] ffmpeg failed (rc=%d): %s", result.returncode, stderr_text)
-                raise ClipError(f"ffmpeg exited with code {result.returncode}: {stderr_text[:500]}")
+    segments = select_segments(camera_root, stream, window_start, window_end, chunk_seconds)
+    if not segments:
+        log.warning(
+            "[clips] event %d: no recorded %s segments cover %s to %s",
+            event_id,
+            stream,
+            window_start.isoformat(),
+            window_end.isoformat(),
+        )
+        return None
 
-            if not output_path.is_file():
-                raise ClipError(f"ffmpeg completed but output file not found: {output_path}")
+    # The concat timeline starts at 0 at the first file's first packet, so the seek offset
+    # is measured from the first segment's name time. A window that starts before the
+    # first segment starts the clip at that segment instead (offset 0).
+    first_start = segments[0][1]
+    clip_start = max(window_start, first_start)
+    offset = (clip_start - first_start).total_seconds()
+    duration = (window_end - clip_start).total_seconds()
 
-            return output_path
+    clips_dir = camera_root / "clips"
+    list_path = clips_dir / f"{event_id}.concat.txt"
+    ts_path = clips_dir / f"{event_id}.ts"
+    mp4_path = clips_dir / f"{event_id}.mp4"
 
-        except subprocess.TimeoutExpired:
-            raise ClipError("ffmpeg timed out after 120 seconds") from None
-        finally:
-            # Clean up concat list
-            if concat_list_path.is_file():
-                try:
-                    concat_list_path.unlink()
-                except OSError:
-                    pass
+    try:
+        # Retention may have pruned an empty clips/ before; create it right before use.
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        list_path.write_text(_concat_list([p for p, _ in segments]), encoding="utf-8")
+    except OSError as exc:
+        log.warning("[clips] event %d: cannot write %s: %s", event_id, list_path, exc)
+        return None
 
-    def cleanup_old_clips(self, max_age_days: int | None = None) -> int:
-        """Delete clip files older than max_age_days.
+    concat_cmd = [
+        ffmpeg_path,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{offset:.3f}",
+        "-t",
+        f"{duration:.3f}",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path),
+        "-c",
+        "copy",
+        "-an",
+        "-f",
+        "mpegts",
+        str(ts_path),
+    ]
+    try:
+        concat_ok = _run_ffmpeg(run, concat_cmd, event_id=event_id, step="concat")
+    finally:
+        _unlink(list_path)
+    if not concat_ok or not _nonempty(ts_path):
+        _unlink(ts_path)
+        return None
 
-        Args:
-            max_age_days: Override the config max_clip_age_days if provided.
-
-        Returns:
-            Number of clips deleted.
-        """
-        import time
-
-        days = max_age_days  # Not using config field yet; for future use
-        if days is None:
-            # Default: keep for 30 days
-            days = 30
-
-        output_dir = Path(self._cfg.output_dir.format(recordings_root=str(self._recordings_dir)))
-        if not output_dir.is_dir():
-            return 0
-
-        cutoff = time.time() - (days * 86400)
-        count = 0
-        for f in output_dir.glob("*.mp4"):
-            try:
-                if f.stat().st_mtime < cutoff:
-                    f.unlink()
-                    count += 1
-            except OSError:
-                pass
-        return count
+    remux_cmd = [
+        ffmpeg_path,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(ts_path),
+        "-c",
+        "copy",
+        "-an",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        str(mp4_path),
+    ]
+    if _run_ffmpeg(run, remux_cmd, event_id=event_id, step="remux") and _nonempty(mp4_path):
+        _unlink(ts_path)
+        return mp4_path
+    _unlink(mp4_path)
+    log.warning("[clips] event %d: MP4 remux failed; keeping %s", event_id, ts_path)
+    return ts_path

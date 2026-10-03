@@ -218,8 +218,15 @@ def test_build_keeps_camera_order_and_field_values(tmp_path: Path) -> None:
     assert isinstance(a.retention, RetentionManager)
     assert a.retention.camera_root == tmp_path / "rec" / "a"
     assert isinstance(b.proxy, MediaMTXProxyServer)
-    assert b.hub is None and b.retention is None
-    assert c.proxy is None and c.hub is None and c.retention is None
+    assert b.hub is None
+    assert c.proxy is None and c.hub is None
+    # Since RW-3 Task 11 every camera has a RetentionManager (thumbnails are swept too).
+    assert isinstance(b.retention, RetentionManager)
+    assert isinstance(c.retention, RetentionManager)
+    assert c.retention.camera_root == tmp_path / "rec" / "c"
+    # b and c record nothing: their sweep is limited to thumbnails/ and clips/.
+    assert c.retention.only_subdirs == ("thumbnails", "clips")
+    assert a.retention.only_subdirs is None
     assert [r.name for r in runtime.detector_runners] == ["detector_a"]
     assert [getattr(x, "name", None) for x in a.dispatcher.consumers] == ["detector_a"]
     assert tuple(b.dispatcher.consumers) == ()
