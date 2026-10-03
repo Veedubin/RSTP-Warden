@@ -44,6 +44,29 @@ cameras:
       fps: 7
       scale_width: 0      # 0 disables scaling
 
+    # Detection (optional). The example rule sends to the "phone" action, so also turn on
+    # the actions example at the end of this file.
+    # --- detection example: delete the leading "# " on the lines below to turn it on ---
+    # detect_fps: 5                # frames per second sent to the detectors (0.5-30)
+    # detectors:
+    #   - type: motion
+    #     fps: 5
+    #   - type: onnx               # YOLOX; the model (about 34 MB) downloads on the first frame
+    #     model: yolox-s           # yolox-nano for a small CPU
+    #     device: auto             # auto | cuda | cpu
+    #     fps: 2                   # at most detect_fps
+    #     min_confidence: 0.5
+    # rules:
+    #   - name: person-any-time
+    #     labels: [person]
+    #     zones: []                # empty = any zone
+    #     min_confidence: 0.6
+    #     between: null            # or "22:00-06:00" (local time, may wrap midnight)
+    #     cooldown_seconds: 60
+    #     clip: true
+    #     actions: [phone]
+    # --- end of detection example ---
+
 runtime:
   ffmpeg_path: ffmpeg
   mediamtx_path: mediamtx
@@ -57,3 +80,14 @@ runtime:
 
   stderr_tail_lines: 200
   status_interval_s: 15
+
+# Actions (optional). ntfy.sh topics are public: keep the topic a long random string in .env
+# (NTFY_TOPIC=...), or use a server with access control and a token.
+# --- actions example: delete the leading "# " on the lines below to turn it on ---
+# actions:
+#   - name: phone
+#     type: ntfy
+#     url: https://ntfy.sh
+#     topic: ${NTFY_TOPIC}        # put NTFY_TOPIC=<long random string> in .env; ntfy.sh topics are public
+#     token: ${NTFY_TOKEN}         # optional; put NTFY_TOKEN=... in .env
+# --- end of actions example ---

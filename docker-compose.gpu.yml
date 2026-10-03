@@ -1,0 +1,18 @@
+# GPU overlay for docker-compose.yml: builds Dockerfile.cuda and reserves the NVIDIA GPU(s).
+# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host. Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+# Detectors with `device: auto` (the default) or `device: cuda` then run on the GPU; the log line
+# "provider: CUDAExecutionProvider" confirms it.
+services:
+  warden:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: rtsp-warden:cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,23 +1,18 @@
+# Foscam C1 V3 on its main stream only: the camera's videoSub stream sends no video, so there is
+# no sub_url and the main stream feeds recording, the live preview and detection.
 # Credentials come from environment variables (see .env):
 #   CAM_USER=admin
 #   CAM_PASS=your-camera-password
 # rtsp-warden expands ${NAME} references in config.yaml at load time.
 cameras:
   - name: front
-    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:5554/videoMain"
-    sub_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:5554/videoSub"
+    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:554/videoMain"
 
     record:
       enabled: true
       output_dir: ./recordings
 
       main:
-        enabled: true
-        container: ts
-        chunk_seconds: 300
-        rtsp_transport: tcp
-
-      sub:
         enabled: true
         container: ts
         chunk_seconds: 300
@@ -32,7 +27,7 @@ cameras:
     proxy:
       enabled: true
       mode: mjpeg         # mjpeg | rtsp
-      stream: sub         # main | sub
+      stream: main        # main | sub (this camera has no usable sub stream)
       bind_host: 0.0.0.0
       port: 9001
 
@@ -43,6 +38,30 @@ cameras:
       # MJPEG options (mode=mjpeg)
       fps: 15
       scale_width: 0      # 0 disables scaling
+
+    # Detection: motion on every tapped frame, YOLOX-s on 2 of the 5 frames per second.
+    # The model (about 34 MB) downloads into runtime.models_dir on the first frame.
+    detect_fps: 5
+    detectors:
+      - type: motion
+        fps: 5
+      - type: onnx
+        model: yolox-s
+        device: auto      # CUDA when the GPU build of onnxruntime is installed, else CPU
+        fps: 2
+        min_confidence: 0.5
+
+    # Notifications (optional). The rule sends to the "phone" action, so also turn on the
+    # actions example at the end of this file.
+    # --- rules example: delete the leading "# " on the lines below to turn it on ---
+    # rules:
+    #   - name: person-any-time
+    #     labels: [person]
+    #     min_confidence: 0.6
+    #     cooldown_seconds: 60
+    #     clip: true
+    #     actions: [phone]
+    # --- end of rules example ---
 
 runtime:
   ffmpeg_path: ffmpeg
@@ -57,3 +76,14 @@ runtime:
 
   stderr_tail_lines: 200
   status_interval_s: 15
+
+# Actions (optional). ntfy.sh topics are public: keep the topic a long random string in .env
+# (NTFY_TOPIC=...), or use a server with access control and a token.
+# --- actions example: delete the leading "# " on the lines below to turn it on ---
+# actions:
+#   - name: phone
+#     type: ntfy
+#     url: https://ntfy.sh
+#     topic: ${NTFY_TOPIC}        # put NTFY_TOPIC=<long random string> in .env; ntfy.sh topics are public
+#     token: ${NTFY_TOKEN}         # optional; put NTFY_TOKEN=... in .env
+# --- end of actions example ---

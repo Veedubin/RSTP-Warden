@@ -23,6 +23,8 @@ services:
       # SQLite in the ./data mount; switch to Postgres by replacing this URL
       WARDEN_DB_URL: sqlite:////app/data/warden.db
       # WARDEN_DB_URL: postgresql+psycopg2://warden:warden@postgres:5432/warden
+      # ONNX models download here on first use; inside ./data, so they survive rebuilds
+      WARDEN_MODELS_DIR: /app/data/models
       # First-start admin (optional; a password is generated and logged otherwise)
       # WARDEN_ADMIN_PASSWORD: change-me
       # Camera credentials referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}

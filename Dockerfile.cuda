@@ -1,0 +1,87 @@
+# rtsp-warden — CUDA image: the slim image (Dockerfile) with onnxruntime-gpu.
+# The venv gets the `gpu` extra (onnxruntime-gpu plus NVIDIA's CUDA 13 and cuDNN 9 pip wheels)
+# instead of the CPU onnxruntime; both builds install the same `onnxruntime` package, so the CPU
+# one is excluded with --no-install-package. No CUDA base image: the NVIDIA Container Toolkit
+# injects the driver at run time, everything else comes from the wheels.
+#
+# Build with:  docker build -f Dockerfile.cuda -t rtsp-warden:cuda .
+# Run with:    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+
+# ---- Stage 1: builder ----
+FROM python:3.13-slim AS builder
+
+# Install build deps (gcc for psycopg2, libxml2/libxslt for lxml-based deps)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency files first (better layer caching)
+COPY pyproject.toml uv.lock ./
+
+# Install with cache mount (the GPU build of onnxruntime only)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra gpu --no-install-package onnxruntime --no-install-project
+
+# Copy source, README (required by pyproject.toml), and install the project
+COPY src ./src
+COPY README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra gpu --no-install-package onnxruntime
+
+# ---- Stage 2: runtime ----
+FROM python:3.13-slim AS runtime
+
+# Install runtime system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxml2 \
+    libxslt1.1 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 warden
+
+WORKDIR /app
+
+# Copy the venv from the builder stage
+COPY --from=builder --chown=warden:warden /app/.venv /app/.venv
+COPY --from=builder --chown=warden:warden /app/src /app/src
+
+# Make sure the venv is on PATH; let the NVIDIA runtime expose the GPU for compute, and let the
+# CUDA provider find the pip-installed CUDA/cuDNN libraries (onnxruntime.preload_dlls() also does)
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WARDEN_WEB_HOST=0.0.0.0 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    LD_LIBRARY_PATH=/app/.venv/lib/python3.13/site-packages/nvidia/cu13/lib:/app/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib
+
+# Volume for recordings + config
+RUN mkdir -p /app/recordings /app/config /app/data && \
+    chown -R warden:warden /app
+
+USER warden
+
+# Expose web UI port
+EXPOSE 8080
+
+# Health check (uses the /healthz endpoint absorbed in Sprint 2)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
+
+# Default command
+CMD ["rtsp-warden", "serve", "-c", "/app/config/config.yaml", "--web", "--web-port", "8080"]
