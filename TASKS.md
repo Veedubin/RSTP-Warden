@@ -23,8 +23,13 @@ One card per unit of work. Status phrases are updated in place; history stays in
 - Status: **done**, merged to `master` 2026-10-02 night on top of RW-2 (branch `feat/detection`, 18 task commits + merge + integration commit; manual task 19 not run, needs the owner). Reviewed 2026-10-03 (`/code-review high`, fixes in `fad1eb8`). Owner decisions kept: ONNX Runtime + YOLOX, GPU first with CPU fallback, per-camera `detect_fps` plus per-detector `fps`, actions = ntfy/Apprise/webhook, no Pi/GPIO.
 
 ## Owner actions (not for agents)
-- Say "push" to publish `master` (58 commits, reviewed, gate green; nothing in them adds the old password).
-- Rotate the Foscam camera password (it is in `origin`'s public history) and decide whether to rewrite that history.
-- Run the manual camera tests (RW-2/12, RW-3/19); build `Dockerfile.cuda` on a GPU host.
-- Rotate the Foscam camera password that is in `origin` git history (pre-scrub `examples/configs/`).
-- Decide on pushing `master` to `origin`.
+- Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
+  the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
+- Run the manual camera tests (RW-2/12, RW-3/19) once the camera is free.
+- Install the NVIDIA Container Toolkit if the GPU should run inside Docker; `Dockerfile.cuda` builds and the GPU test passes
+  natively on this host (2026-10-03), only the in-container GPU run is untested.
+
+## Done 2026-10-03
+- History rewrite (`git filter-repo`, real credentials → `admin:admin`) and force-push of `master` + `v1.3.0`; nothing
+  tracked or in history holds the real login any more.
+- `Dockerfile.cuda` built (5.29 GB, onnxruntime-gpu 1.30.0 with the CUDA provider) and `pytest -m gpu` passed on the RTX 4080.

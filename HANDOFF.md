@@ -2,7 +2,41 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
-## 2026-10-03 (morning) — START HERE: RW-2 + RW-3 built, merged, reviewed and fixed on local master; waiting for the owner's push decision
+## 2026-10-03 (midday) — START HERE: history rewritten (password gone), master pushed, CUDA image verified
+
+**Where things are.** `master` = `origin/master` at `90a5d52` (plus this docs commit), single checkout
+`/home/jcharles/Projects/python/rtsp-warden_v0.2.0`. On 2026-10-03 the owner said "scrub my password ... then push it", so the
+whole history was rewritten with `git filter-repo --replace-text` (one literal rule: the real `user:pass@` in
+`config-Foscam-C1-V3.yaml` / `examples/configs/config-Foscam-C1-V3.yaml` became `admin:admin@`; it touched 11 commits and
+nothing else, commit messages were clean). Every SHA changed (`1710701` → `90a5d52`, tag `v1.3.0` → `fa5fbf2`). Verified with
+`git grep -F <pass> $(git rev-list --all)` = 0 hits across all 67 commits before `git push --force origin master` and
+`git push --force origin refs/tags/v1.3.0`. The local branches `feat/ui-pass` and `feat/detection` were deleted (fully merged).
+The pre-rewrite bundle was deleted after the push; the only copy of the old history is whatever GitHub still holds. The real
+login stays only in the gitignored `.env` (`CAM_USER` / `CAM_PASS`). Gate at `90a5d52` (tree identical to `1710701`):
+2156 passed / 1 skipped, ruff exactly 4 baseline E501, format clean.
+
+**CUDA verified on this host (RTX 4080 SUPER).** `docker build -f Dockerfile.cuda -t rtsp-warden:cuda .` succeeds (5.29 GB);
+inside the image `onnxruntime-gpu` 1.30.0 is the only onnxruntime distribution and lists `CUDAExecutionProvider`;
+`rtsp-warden doctor` on an `init-config` file passes. The GPU itself was exercised natively, not in Docker: a scratch venv
+(`UV_PROJECT_ENVIRONMENT=<scratch> uv sync --frozen --extra gpu --no-install-package onnxruntime`) ran
+`pytest -m gpu` (1 passed, the CUDA provider check) and the 47 onnxruntime / ONNX detector tests. Docker could not attach the
+GPU (`--gpus all` → "no known GPU vendor found") because the NVIDIA Container Toolkit (`nvidia-ctk`) is not installed on this
+CachyOS host; `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up` needs it.
+
+**Known open.**
+- GitHub still serves the old pre-rewrite commits by SHA (e.g. `70fa60a`) until it garbage-collects them; the owner can ask
+  GitHub Support to purge them. The password was public for a while either way, so rotating it on the camera is still due.
+- Any other clone of the repo must be re-cloned (or `git fetch && git reset --hard origin/master`); old clones re-introduce the
+  old history if they push.
+- Manual Foscam tests (plan tasks RW-2/12, RW-3/19) still not run (camera not released). GPU-in-Docker not run (toolkit missing).
+- Pre-existing, out of scope: `record.mode: event` cameras cannot start recording from detection (the tap rides the same ffmpeg).
+
+**Next, in order.** 1. Owner rotates the Foscam password (then updates `.env`). 2. Owner installs the NVIDIA Container Toolkit if
+GPU-in-Docker matters, then `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build` and look for
+`provider: CUDAExecutionProvider` in the log. 3. Manual camera verification per the two plan tasks (192.168.1.72, main stream
+only, login in `.env`).
+
+## 2026-10-03 (morning) — RW-2 + RW-3 built, merged, reviewed and fixed on local master; waiting for the owner's push decision
 
 **Where things are.** `master` in the single checkout `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`; code head
 `dcadb42` (review fixes in `fad1eb8`, integration in `57fb350`, merge in `80c2323`); 58 commits ahead of
