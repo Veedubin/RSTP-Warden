@@ -85,7 +85,7 @@ printf 'CAM_USER=admin\nCAM_PASS=admin\n' > .env
 # Run
 docker compose up -d
 docker compose logs warden | grep "created admin"   # first-start admin password
-# Browse to http://localhost:8080
+# Browse to http://localhost:3333 (compose maps host port 3333; set WARDEN_HOST_PORT in .env to change it)
 ```
 
 The distroless image is 685 MB. See [docker/README.md](docker/README.md) for the slim alternative, ONVIF/UDP notes, and volume-mounting gotchas.

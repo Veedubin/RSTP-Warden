@@ -13,7 +13,7 @@ services:
     container_name: rtsp-warden
     restart: unless-stopped
     ports:
-      - "8080:8080"     # Web UI
+      - "${WARDEN_HOST_PORT:-3333}:8080"   # Web UI on the host (WARDEN_HOST_PORT in .env overrides 3333)
       - "9001:9001"     # MJPEG proxy (optional; only if MJPEG proxy enabled)
     volumes:
       - ./config:/app/config                 # config.yaml + .env; the web UI writes here
@@ -25,8 +25,8 @@ services:
       # WARDEN_DB_URL: postgresql+psycopg2://warden:warden@postgres:5432/warden
       # ONNX models download here on first use; inside ./data, so they survive rebuilds
       WARDEN_MODELS_DIR: /app/data/models
-      # First-start admin (optional; a password is generated and logged otherwise)
-      # WARDEN_ADMIN_PASSWORD: admin
+      # First-start admin password (optional; put WARDEN_ADMIN_PASSWORD=... in .env, else one is generated and logged)
+      WARDEN_ADMIN_PASSWORD: ${WARDEN_ADMIN_PASSWORD:-}
       # Camera credentials referenced from config.yaml as ${CAM_USER} / ${CAM_PASS}
       CAM_USER: ${CAM_USER:-admin}
       CAM_PASS: ${CAM_PASS:-}

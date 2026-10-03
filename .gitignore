@@ -58,3 +58,6 @@ Archive.zip
 
 # Internal sprint planning documents
 SPRINT*_PLAN.md
+# compose bind mounts at the repo root (the owner's config.yaml, .env copy, SQLite DB, models)
+config/
+data/

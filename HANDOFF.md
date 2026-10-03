@@ -37,9 +37,16 @@ natively in a scratch GPU venv (`UV_PROJECT_ENVIRONMENT=<scratch> uv sync --froz
 - Manual Foscam tests (plan tasks RW-2/12, RW-3/19) still not run (camera not released).
 - Pre-existing, out of scope: `record.mode: event` cameras cannot start recording from detection (the tap rides the same ffmpeg).
 
-**Next, in order.** 1. Owner rotates the Foscam password (then updates `.env`). 2. Manual camera verification per the two plan
-tasks (192.168.1.72, main stream only, login in `.env`); with the GPU, `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`
-is the way to run it on this host.
+**Running on this host (2026-10-03 midday).** `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`
+is up: `./config/config.yaml` is a copy of `examples/configs/config-Foscam-C1-V3.yaml` (main stream only, motion + yolox-s on
+`device: auto`), credentials and `WARDEN_ADMIN_PASSWORD` come from the repo-root `.env` (gitignored; compose interpolates it),
+the DB and models live in `./data`, segments in `./recordings`. Host port 8080 was taken by another rootless container stack
+(`rootlessport`), so compose now publishes the web UI on `${WARDEN_HOST_PORT:-3333}` (owner's choice) and `config/`, `data/` are
+gitignored. First start: migrations ran to 0003, the Foscam main stream shows RUN, yolox-s downloaded and loaded with
+`provider: CUDAExecutionProvider` (about 400 MiB on the GPU), `/healthz` ok at http://127.0.0.1:3333/.
+
+**Next, in order.** 1. Owner rotates the Foscam password (then updates `.env` and `docker compose restart warden`). 2. Owner walks
+the manual checks of plan tasks RW-2/12 and RW-3/19 in the running UI (login `admin` with the `.env` password, then change it).
 
 ## 2026-10-03 (morning) — RW-2 + RW-3 built, merged, reviewed and fixed on local master; waiting for the owner's push decision
 

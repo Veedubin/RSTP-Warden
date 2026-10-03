@@ -25,7 +25,7 @@ One card per unit of work. Status phrases are updated in place; history stays in
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
-- Run the manual camera tests (RW-2/12, RW-3/19) once the camera is free.
+- Walk the manual camera checks (RW-2/12, RW-3/19) in the stack now running on http://127.0.0.1:3333/ (GPU overlay, Foscam main stream).
 
 ## Done 2026-10-03
 - History rewrite (`git filter-repo`, real credentials → `admin:admin`) and force-push of `master` + `v1.3.0`; nothing

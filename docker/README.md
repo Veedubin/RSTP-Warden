@@ -17,7 +17,7 @@ docker compose up -d
 
 # OR build and run the larger slim image
 docker build -t rtsp-warden:latest .
-docker run -d --name rtsp-warden -p 8080:8080 \
+docker run -d --name rtsp-warden -p 3333:8080 \
     -v $(pwd)/config:/app/config \
     -v $(pwd)/recordings:/app/recordings \
     -v $(pwd)/data:/app/data \
@@ -105,10 +105,10 @@ docker run --rm rtsp-warden:distroless ffmpeg -version
 docker run --rm rtsp-warden:distroless python3 -c "import rtsp_warden; print(rtsp_warden.__version__)"
 
 # Check the app starts
-docker run --rm -p 8080:8080 -v $(pwd)/config:/app/config \
+docker run --rm -p 3333:8080 -v $(pwd)/config:/app/config \
     -v $(pwd)/recordings:/app/recordings \
     -v $(pwd)/data:/app/data \
     -e WARDEN_WEB_HOST=0.0.0.0 \
     rtsp-warden:distroless
-# Then curl http://localhost:8080/healthz
+# Then curl http://localhost:3333/healthz
 ```
