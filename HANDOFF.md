@@ -2,7 +2,49 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
-## 2026-10-03 (midday) — START HERE: history rewritten (password gone), master pushed, CUDA image verified on the GPU in Docker
+## 2026-10-03 (afternoon) — START HERE: RW-4 done (stationary suppression, full-size thumbnails, Foscam settings page), pushed
+
+**Where things are.** `master` = `origin/master`, single checkout `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`.
+Three feature commits on top of the midday state: `5b76252` stationary suppression, `498e313` full-size thumbnails,
+and the Foscam camera-settings page (see `git log`). Gate: `uv run pytest -q` → 2228 passed, 1 skipped (`gpu` marker);
+`uv run ruff check src/ tests/` → exactly the 4 baseline E501; `uv run ruff format --check` clean. Everything was built
+test-first by one implementer after the owner's "go"; the record is `docs/superpowers/plans/2026-10-03-rw4-followups.md`.
+
+**What RW-4 changed.**
+- `CameraConfig.stationary_iou` (default 0.6; 0 = off): a track whose box still overlaps where it was first seen by that
+  IoU is held, opens no event until it moves (then with the move frame as `created_at`), and is dropped if it ends in
+  place. `Track.first_bbox`, `EventBuilder(stationary_iou=)`, `held_count` / `suppressed_total`, runner status and
+  `/status.json` (`stationary_held`, `stationary_suppressed`), Detection panel field and count. The component default
+  stays 0 so hand-built builders behave as before; the camera default wires 0.6.
+- `FrameHub` history (`frame_near`) + `EventBuilder(frame_source=hub.frame_near)`: thumbnails are the full-size preview
+  frame nearest the best detection with the box scaled on, never downgraded to a tap-size one afterwards. Cameras
+  without an MJPEG hub keep tap-size thumbnails.
+- `vendors/foscam.py` + `web/routes/vendor.py` + `cameras/vendor.html` and three partials: `/cameras/{name}/vendor`
+  (admin) with device info, main/sub stream profiles (use / edit), image tuning, mirror / flip / infrared / OSD, a
+  snapshot from the camera and reboot. Enabled per camera by `vendor: {type: foscam, port: 88}` (the page's own enable
+  form patches only that key). Credentials come from `main_url`; errors never carry URL or credentials. Tests inject a
+  fake through `vendor_routes._client`.
+
+**Live state on this host.** The compose stack (GPU overlay, port 3333) runs the new code against the Foscam, with
+`vendor:` enabled in `./config/config.yaml`, `detect_classes` limited to person/cat/dog/car/truck/bicycle/motorcycle,
+`min_confidence` 0.6 and `min_track_frames` 3. The camera's main stream was switched to its profile 0 (2 Mbps, 25 fps,
+VBR) through the CGI (`setMainVideoStreamType&streamType=0`; `streamType=1` is the old 1 Mbps/15 fps one). The settings
+page was fetched logged-in against the real camera: device, profiles, image values and a 191 KB snapshot render, the
+password is nowhere in the page. Not yet observed live: a real event's full-size thumbnail (no event since the restart).
+
+**Known open.**
+- The tracker (pre-existing) matches consecutive boxes at IoU >= 0.3, so something crossing the frame faster than its
+  own width per detector frame is never tracked; such cameras need a higher detector `fps`.
+- Foscam resolution codes: only 0 (1280x720) and 3 (640x360) are named, both read off this C1 V3; the vendor guide
+  lists a different order, so other codes show as numbers. Other vendors: none.
+- Earlier items still stand: rotate the Foscam password (old commits may still be served by GitHub by SHA), manual
+  checks RW-2/12 and RW-3/19 in the running UI.
+
+**Next, in order.** 1. Owner watches the next real events (thumbnail width, "held back" count on the Detection panel;
+tune Stationary IoU there if a real visitor is ever held). 2. Owner rotates the camera password, updates `.env`, and
+runs `docker compose -f docker-compose.yml -f docker-compose.gpu.yml restart warden`. 3. Manual checks RW-2/12, RW-3/19.
+
+## 2026-10-03 (midday) — history rewritten (password gone), master pushed, CUDA image verified on the GPU in Docker
 
 **Where things are.** `master` = `origin/master` at `90a5d52` (plus this docs commit), single checkout
 `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`. On 2026-10-03 the owner said "scrub my password ... then push it", so the

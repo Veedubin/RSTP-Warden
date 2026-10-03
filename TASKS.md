@@ -22,10 +22,21 @@ One card per unit of work. Status phrases are updated in place; history stays in
 - Plan: `docs/superpowers/plans/2026-10-02-detection.md` (rulings in `2026-10-02-rw2-rw3-decisions.md`)
 - Status: **done**, merged to `master` 2026-10-02 night on top of RW-2 (branch `feat/detection`, 18 task commits + merge + integration commit; manual task 19 not run, needs the owner). Reviewed 2026-10-03 (`/code-review high`, fixes in `fad1eb8`). Owner decisions kept: ONNX Runtime + YOLOX, GPU first with CPU fallback, per-camera `detect_fps` plus per-detector `fps`, actions = ntfy/Apprise/webhook, no Pi/GPIO.
 
+## RW-4 — Follow-ups from the first live run (added 2026-10-03 afternoon)
+- Plan/record: `docs/superpowers/plans/2026-10-03-rw4-followups.md`
+- Scope (owner's "go"): 1. stationary suppression (`stationary_iou`, default 0.6, in the Detection panel);
+  2. full-size event thumbnails from the preview frame nearest the detection; 3. a per-camera "Camera
+  settings" page over Foscam's HTTP CGI (`vendor: {type: foscam, port: 88}`), replacing the dead browser plugin.
+- Status: **done** on `master` 2026-10-03, test-first, one implementer. Verified live on the owner's Foscam
+  (page renders device, profiles, image, snapshot; password never in the page). Not yet observed live: a real
+  event's full-size thumbnail (no event happened after the restart yet).
+
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
 - Walk the manual camera checks (RW-2/12, RW-3/19) in the stack now running on http://127.0.0.1:3333/ (GPU overlay, Foscam main stream).
+- Look at the next few real events: thumbnails should now be 1280 px wide, and the Detection panel's "held back"
+  count should grow instead of microwave/bottle events. Tune Stationary IoU there if a real visitor is ever held.
 
 ## Done 2026-10-03
 - History rewrite (`git filter-repo`, real credentials → `admin:admin`) and force-push of `master` + `v1.3.0`; nothing
