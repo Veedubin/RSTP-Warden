@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Actions{% endblock %}
+{% block content %}
+<hgroup>
+  <h1>Actions</h1>
+  <p>Where notifications go when a camera rule matches an event.</p>
+</hgroup>
+
+{% if stats_error %}
+<p role="alert"><mark>Run history is unavailable right now (the database could not be read). The actions below come from config.yaml.</mark></p>
+{% endif %}
+
+{% if rows %}
+<div class="overflow-auto">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Type</th>
+      <th scope="col">Used by rules</th>
+      <th scope="col">Last run</th>
+      <th scope="col">Last status</th>
+      <th scope="col">Failures</th>
+      <th scope="col">Test</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr data-action="{{ row.name }}">
+      <td><strong>{{ row.name }}</strong></td>
+      <td>{{ row.type }}</td>
+      <td>{% if row.used_by %}{{ row.used_by | join(", ") }}{% else %}<small>no rule</small>{% endif %}</td>
+      <td>{% if row.last_run %}<time datetime="{{ row.last_run_iso }}">{{ row.last_run }}</time>{% else %}never{% endif %}</td>
+      <td>{% if row.last_status == "ok" %}<ins>ok</ins>{% elif row.last_status %}<mark>{{ row.last_status }}</mark>{% else %}-{% endif %}</td>
+      <td data-failures="{{ row.failures }}">{{ row.failures }}</td>
+      <td>
+        <button type="button" class="outline"
+                hx-post="/actions/{{ row.name | urlencode }}/test"
+                hx-target="#action-test-{{ loop.index }}"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this">Test</button>
+        <div id="action-test-{{ loop.index }}" aria-live="polite"></div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<article>
+  <p>No actions are configured.</p>
+</article>
+{% endif %}
+
+<article>
+  <header><strong>Editing actions</strong></header>
+  <p>Actions are edited in <code>config.yaml</code> under <code>actions:</code>. Each camera rule lists the
+    actions it triggers by name. Restart rtsp-warden after changing either.</p>
+<pre><code>actions:
+  - name: phone
+    type: ntfy
+    url: https://ntfy.sh
+    topic: ${NTFY_TOPIC}
+    token: ${NTFY_TOKEN}</code></pre>
+  <p><small>Test sends a sample notification through the action now. It is not recorded in the run history.</small></p>
+</article>
+{% endblock %}

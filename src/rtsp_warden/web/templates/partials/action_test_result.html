@@ -1,0 +1,5 @@
+{% if result.ok %}
+<small><ins data-test-status="ok">Test sent through {{ name }}.</ins></small>
+{% else %}
+<small><mark data-test-status="failed">Test failed: {{ (result.error or "no details") | truncate(200) }}</mark></small>
+{% endif %}

@@ -20,6 +20,7 @@ from ..config import AppConfig
 from .auth_depends import LoginRequired
 from .config import WebSettings
 from .paths import STATIC_DIR
+from .routes.actions import router as actions_router
 from .routes.auth import router as auth_router
 from .routes.cameras import router as cameras_router
 from .routes.dashboard import router as dashboard_router
@@ -103,6 +104,7 @@ def create_app(
     app.include_router(users_router)
     app.include_router(tokens_router)
     app.include_router(settings_router)
+    app.include_router(actions_router)
     app.include_router(onvif_router)
     app.include_router(zones_router)
 
