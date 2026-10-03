@@ -2,7 +2,33 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
-## 2026-10-03 (afternoon) — START HERE: RW-4 done (stationary suppression, full-size thumbnails, Foscam settings page), pushed
+## 2026-10-03 (late afternoon) — START HERE: RW-4 verified by the owner on the live camera; nothing in flight
+
+**Where things are.** `master` = `origin/master` at `17e196b` plus this docs commit; single checkout
+`/home/jcharles/Projects/python/rtsp-warden_v0.2.0`, no worktrees, working tree clean apart from the gitignored
+`config/`, `data/`, `recordings/`, `.env`. Gate unchanged since the block below: 2228 passed / 1 skipped, ruff exactly the
+4 baseline E501, format clean. The compose stack (GPU overlay, http://127.0.0.1:3333/) runs this code against the Foscam.
+
+**What happened.** After the RW-4 push the owner used the new Camera settings page on the real camera and reported,
+verbatim: "I was able to change the profile just fine. It seems to work. Motion detection and object recognition works."
+That is the owner's acceptance of RW-4/3 (stream-profile switching through the Foscam CGI) and a first pass over the
+live detection path of RW-3 (motion and YOLOX on the GPU produce events). No code changed after `63c2697`.
+
+**Known open.**
+- Not yet seen by anyone: a real event's full-size (1280 px) thumbnail and a growing "held back" count on the Detection
+  panel; both need a real visitor / a light change after the restart. If a real visitor is ever held, lower
+  Stationary IoU on the Detection panel (default 0.6; 0 turns it off).
+- Pre-existing tracker limit: consecutive boxes must overlap at IoU >= 0.3, so a fast crosser is never tracked; raise
+  the detector `fps` on such cameras.
+- Foscam resolution codes other than 0 (1280x720) and 3 (640x360) show as numbers (unverified on this model).
+- Still the owner's: rotate the Foscam password (then `.env` +
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml restart warden`); the remaining items of the manual
+  checklists RW-2/12 and RW-3/19 (add-camera flow, rules firing an action, clips) were not walked explicitly.
+
+**Next, in order.** 1. Nothing is queued for an agent; the next agent task is whatever the owner reports from using the
+UI (bugs or the next feature). 2. Owner: password rotation, then the rest of the manual checklists.
+
+## 2026-10-03 (afternoon) — superseded by the block above: RW-4 done (stationary suppression, full-size thumbnails, Foscam settings page), pushed
 
 **Where things are.** `master` = `origin/master`, single checkout `/home/jcharles/Projects/python/rtsp-warden_v0.2.0`.
 Three feature commits on top of the midday state: `5b76252` stationary suppression, `498e313` full-size thumbnails,

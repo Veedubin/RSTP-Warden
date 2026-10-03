@@ -27,14 +27,15 @@ One card per unit of work. Status phrases are updated in place; history stays in
 - Scope (owner's "go"): 1. stationary suppression (`stationary_iou`, default 0.6, in the Detection panel);
   2. full-size event thumbnails from the preview frame nearest the detection; 3. a per-camera "Camera
   settings" page over Foscam's HTTP CGI (`vendor: {type: foscam, port: 88}`), replacing the dead browser plugin.
-- Status: **done** on `master` 2026-10-03, test-first, one implementer. Verified live on the owner's Foscam
-  (page renders device, profiles, image, snapshot; password never in the page). Not yet observed live: a real
-  event's full-size thumbnail (no event happened after the restart yet).
+- Status: **done and accepted** on `master` 2026-10-03 (`5b76252`, `498e313`, `63c2697`; pushed). Owner, verbatim:
+  "I was able to change the profile just fine. It seems to work. Motion detection and object recognition works."
+  Not yet observed live: a real event's full-size thumbnail and the "held back" count growing.
 
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
-- Walk the manual camera checks (RW-2/12, RW-3/19) in the stack now running on http://127.0.0.1:3333/ (GPU overlay, Foscam main stream).
+- Walk the rest of the manual camera checks (RW-2/12, RW-3/19) in the stack running on http://127.0.0.1:3333/ (GPU
+  overlay, Foscam main stream); motion + object detection and the Camera settings page are confirmed working (2026-10-03).
 - Look at the next few real events: thumbnails should now be 1280 px wide, and the Detection panel's "held back"
   count should grow instead of microwave/bottle events. Tune Stationary IoU there if a real visitor is ever held.
 

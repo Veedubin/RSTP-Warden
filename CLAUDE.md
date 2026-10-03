@@ -19,7 +19,7 @@ code and fix the README. This file covers what the README does not say.
 
 ```bash
 uv sync                          # installs runtime (incl. onnxruntime CPU) + dev group (pytest, pytest-cov, pytest-asyncio, onnx)
-uv run pytest                    # ~1530 tests, ~120s, fully offline (no ffmpeg, cameras, network, or model weights)
+uv run pytest                    # ~2230 tests, ~220s, fully offline (no ffmpeg, cameras, network, or model weights)
 uv run pytest tests/test_X.py    # one file
 uv run pytest -k "pattern"       # by name
 uv run ruff check src/ tests/    # 4 pre-existing E501 in v0.x files are the accepted baseline (see below)
@@ -124,6 +124,12 @@ CameraRuntime.dispatcher → DetectorRunner.on_frame (one per camera; queue 8, d
       → on open:  RuleEngine.evaluate → ActionQueue (one action_runs row per run)
       → on close: ClipScheduler (when a matched rule has clip: true)
 ```
+
+RW-4 (2026-10-03) added two rules inside the EventBuilder: a track whose box still overlaps its `first_bbox` by
+`CameraConfig.stationary_iou` (default 0.6, 0 = off) is *held* and opens no event until it moves (then `created_at` is
+the move frame); and thumbnails come from the camera `FrameHub`'s short history (`frame_near`) at full preview size when
+the camera has an MJPEG hub, never downgraded afterwards. `EventBuilder` itself defaults both off; `_make_runner` wires
+them. Status surfaces carry `stationary_held` / `stationary_suppressed`.
 
 The `Detector` protocol (`detectors/base.py`) is `name`, `kind`, `setup()`,
 `process(frame_bgr, ts_unix) -> list[Detection]` (bbox is x, y, w, h in frame pixels),
@@ -276,6 +282,15 @@ ONVIF page posts forms and swaps server-rendered fragments; tests patch the
 under the lock, so `${VAR}` text survives. Event
 subscriptions are asyncio tasks on the uvicorn loop held in a module-level registry.
 They are not persisted and do not survive a restart.
+
+### Camera vendor API (`vendors/`, `web/routes/vendor.py`)
+
+`vendors/foscam.py` wraps Foscam's HTTP CGI (`/cgi-bin/CGIProxy.fcgi?cmd=...`, port 88) with httpx, one client per
+call, result codes as text, no URL or credentials in errors. `/cameras/{name}/vendor` (admin) is enabled per camera by
+`vendor: {type: foscam, port: 88}`; its enable/disable forms patch only that key of the raw YAML, credentials come from
+`main_url` through `camera_edit.split_userinfo`, and the stream / image / video sections post back as htmx fragments.
+Tests inject a fake through `vendor_routes._client`. The owner's Foscam C1 V3 answers this API with the same account as
+RTSP; its web page's ActiveX plugin was only ever the live-video decoder.
 
 ### Proxy modes
 
