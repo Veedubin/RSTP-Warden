@@ -5,26 +5,59 @@ PTZPresetStore (in-memory manager backed by AppConfig with optional YAML
 persistence), and PTZPresetError for domain-specific failures.
 
 Presets are stored as a list of PTZPresetConfig on each CameraConfig in
-config.yaml.  The store reads/writes the live AppConfig object; when a
-config_path is provided, mutations are persisted back to the YAML file.
+config.yaml.  The store reads/writes the live AppConfig object. Writes go
+through a persist callable that receives one camera's whole preset list; the
+default one (used when a config_path is given) patches that camera's raw
+``presets`` key in config.yaml under the config lock, so ``${VAR}`` references
+in the file are never replaced by their expanded values.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
-import yaml
+from pydantic import ValidationError
 
 from ..config import AppConfig, CameraConfig, PTZPresetConfig
 from .ptz import OnvifPTZ
 
-if TYPE_CHECKING:
-    pass  # avoid circular imports at runtime
-
 log = logging.getLogger(__name__)
+
+PresetPersist = Callable[[str, list[dict[str, Any]]], None]
+"""Writes one camera's full preset list (JSON-ready dicts) to durable config."""
+
+
+def _config_file_persist(config_path: Path) -> PresetPersist:
+    """Default persist callable: patch the camera's raw ``presets`` key in config.yaml.
+
+    Uses ``web.services.camera_config.patch_camera`` (raw YAML, config lock, atomic
+    replace). An empty list removes the key. Raises ``KeyError`` when the camera is
+    not in the file and ``OSError`` when the file cannot be written.
+    """
+
+    def _persist(camera_name: str, presets: list[dict[str, Any]]) -> None:
+        # Imported at call time so importing rtsp_warden.onvif never loads the web layer.
+        from ..web.services.camera_config import patch_camera
+
+        if presets:
+            patch_camera(config_path, camera_name, {"presets": presets})
+        else:
+            patch_camera(config_path, camera_name, {}, remove_keys=("presets",))
+
+    return _persist
+
+
+def _validation_message(exc: ValidationError) -> str:
+    """First pydantic error message, without the "Value error, " prefix."""
+    errors = exc.errors()
+    if not errors:
+        return "invalid preset"
+    return str(errors[0].get("msg", "invalid preset")).removeprefix("Value error, ")
 
 
 class PTZPresetError(Exception):
@@ -61,12 +94,24 @@ class PTZPresetStore:
     Args:
         cfg: The live AppConfig instance.
         config_path: Optional path to config.yaml for persistence.
-            If None, mutations are in-memory only.
+            If None and no ``persist`` is given, mutations are in-memory only.
+        persist: Optional callable ``(camera_name, presets)`` that stores one
+            camera's whole preset list. Defaults to a raw-YAML patch of
+            ``config_path`` when a path is given.
     """
 
-    def __init__(self, cfg: AppConfig, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        cfg: AppConfig,
+        config_path: Path | None = None,
+        *,
+        persist: PresetPersist | None = None,
+    ) -> None:
         self._cfg = cfg
         self._config_path = config_path
+        if persist is None and config_path is not None:
+            persist = _config_file_persist(config_path)
+        self._persist_fn = persist
 
     def list_presets(self, camera_name: str) -> list[PTZPreset]:
         """Return presets for a camera, or empty list if camera not found."""
@@ -127,7 +172,9 @@ class PTZPresetStore:
             The newly created PTZPreset.
 
         Raises:
-            PTZPresetError: If the camera is not found or name is invalid.
+            PTZPresetError: If the camera is not found, the name is invalid, or a
+                value is out of range. Nothing changes in memory or on disk.
+            OSError, KeyError: From the persist callable; memory is left unchanged.
         """
         stripped = name.strip()
         if not stripped:
@@ -139,34 +186,37 @@ class PTZPresetStore:
         if not cam:
             raise PTZPresetError(f"Camera {camera_name!r} not found")
 
-        # Remove existing preset with same name (idempotent overwrite)
-        cam.presets = [p for p in cam.presets if p.name != stripped]
+        try:
+            new_preset_cfg = PTZPresetConfig(name=stripped, pan=pan, tilt=tilt, zoom=zoom)
+        except ValidationError as exc:
+            raise PTZPresetError(_validation_message(exc)) from exc
 
-        new_preset_cfg = PTZPresetConfig(name=stripped, pan=pan, tilt=tilt, zoom=zoom)
-        cam.presets.append(new_preset_cfg)
+        # Replace an existing preset with the same name (idempotent overwrite).
+        updated = [p for p in cam.presets if p.name != stripped]
+        updated.append(new_preset_cfg)
 
-        if self._config_path:
-            await self._persist()
+        await self._persist(camera_name, updated)
+        cam.presets = updated
 
         return PTZPreset(name=stripped, pan=pan, tilt=tilt, zoom=zoom)
 
     async def delete_preset(self, camera_name: str, preset_name: str) -> bool:
         """Delete a preset. Returns True if it existed, False otherwise.
 
-        Persists to config.yaml if path provided.
+        Persists through the persist callable first; if that raises, memory is
+        left unchanged and the exception propagates.
         """
         cam = self._find_camera(camera_name)
         if not cam:
             return False
 
-        original_len = len(cam.presets)
-        cam.presets = [p for p in cam.presets if p.name != preset_name]
+        remaining = [p for p in cam.presets if p.name != preset_name]
+        if len(remaining) == len(cam.presets):
+            return False
 
-        if len(cam.presets) < original_len:
-            if self._config_path:
-                await self._persist()
-            return True
-        return False
+        await self._persist(camera_name, remaining)
+        cam.presets = remaining
+        return True
 
     def _find_camera(self, name: str) -> CameraConfig | None:
         """Look up a CameraConfig by name in the live AppConfig."""
@@ -175,23 +225,14 @@ class PTZPresetStore:
                 return cam
         return None
 
-    async def _persist(self) -> None:
-        """Write AppConfig back to the YAML file.
+    async def _persist(self, camera_name: str, presets: list[PTZPresetConfig]) -> None:
+        """Hand one camera's new preset list to the persist callable, off the event loop.
 
-        Uses yaml.safe_dump for serialization. Runs in a thread executor
-        to avoid blocking the event loop on disk I/O.
+        No-op without a persist callable. Exceptions from the callable propagate;
+        callers assign ``cam.presets`` only after this returns.
         """
-        if not self._config_path:
+        if self._persist_fn is None:
             return
-
-        import asyncio
-
-        data = self._cfg.model_dump(mode="json")
-        content = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
-
-        def _write() -> None:
-            self._config_path.write_text(content, encoding="utf-8")
-
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _write)
-        log.info("Persisted config to %s", self._config_path)
+        payload = [p.model_dump(mode="json") for p in presets]
+        await asyncio.to_thread(self._persist_fn, camera_name, payload)
+        log.info("Persisted %d PTZ preset(s) for camera %s", len(payload), camera_name)
