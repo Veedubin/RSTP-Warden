@@ -18,6 +18,12 @@ from pydantic import (
 )
 
 from .deprecations import warn_once as _warn_once
+from .detectors.model_registry import (
+    ModelError,
+    camera_model_labels,
+    default_models_dir,
+    unknown_labels_message,
+)
 from .detectors.registry import DetectorSpec
 
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -731,6 +737,14 @@ class RuntimeConfig(BaseModel):
 
     status_interval_s: float = 15.0
 
+    # ONNX model files and user model directories (<models_dir>/<name>/model.yaml).
+    models_dir: Path = Field(default_factory=default_models_dir)
+
+    @field_validator("models_dir")
+    @classmethod
+    def _expand_models_dir(cls, v: Path) -> Path:
+        return v.expanduser()
+
     @field_validator(
         "restart_backoff_min_s",
         "restart_backoff_max_s",
@@ -773,12 +787,48 @@ class ClipsConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
+    # Validation errors never echo the input: it holds env-expanded camera URLs.
+    model_config = {"hide_input_in_errors": True}
+
     cameras: list[CameraConfig]
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     onvif: OnvifConfig = Field(default_factory=OnvifConfig)
     clips: ClipsConfig = Field(default_factory=ClipsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)  # global fallback
+
+    @model_validator(mode="after")
+    def _validate_labels(self) -> AppConfig:
+        """detect_classes and rules[].labels must be labels of the camera's onnx models.
+
+        The valid set is the union of the labels of every ``onnx`` detector on the
+        camera, enabled or not; rule labels may also be ``motion``. Cameras without
+        an ``onnx`` detector are skipped. Only descriptors and labels files are
+        read, never the model file, so this works before the first download.
+        """
+        for cam in self.cameras:
+            try:
+                per_model = camera_model_labels(cam, self.runtime.models_dir)
+            except ModelError as exc:
+                raise ValueError(f"camera {cam.name!r}: {exc}") from None
+            if not per_model:
+                continue
+            universe = {label for labels in per_model.values() for label in labels}
+            if cam.detect_classes is not None:
+                unknown = [c for c in cam.detect_classes if c not in universe]
+                if unknown:
+                    raise ValueError(
+                        unknown_labels_message(cam.name, "detect_classes", unknown, per_model)
+                    )
+            for rule in cam.rules:
+                unknown = [lb for lb in rule.labels if lb != "motion" and lb not in universe]
+                if unknown:
+                    raise ValueError(
+                        unknown_labels_message(
+                            cam.name, f"rule {rule.name!r} labels", unknown, per_model
+                        )
+                    )
+        return self
 
 
 def load_config(path: str | Path) -> AppConfig:

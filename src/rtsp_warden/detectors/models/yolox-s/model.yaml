@@ -1,0 +1,10 @@
+# YOLOX-S (Megvii, Apache-2.0), official ONNX export from the 0.1.1rc0 release.
+# Input: images float32 [1, 3, 640, 640], BGR 0-255, top-left letterbox padded with 114.
+# The .onnx file is downloaded on first use into <models_dir>/yolox-s/ and verified.
+name: yolox-s
+file: yolox_s.onnx
+labels: coco.txt
+input_size: [640, 640]
+postprocess: yolox
+sha256: c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063
+url: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx
