@@ -3,6 +3,9 @@
 Provides liveness probes, full status, and Prometheus-style metrics.
 The /healthz, /status.json, and /metrics endpoints replace the
 absorbed rtsp_warden.health_server module.
+
+None of these routes needs a login, and an ingest's ``stderr_tail`` echoes the camera
+URL with its password, so every status they return goes through ``_redact_status``.
 """
 
 from __future__ import annotations
@@ -16,11 +19,27 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from ... import __version__
+from ...ffmpeg import redact_text
 from ...status_model import make_empty_status, normalize_status
 from ..services.runtime import get_runtime_status
 from ._common import templates
 
 router = APIRouter()
+
+
+def _redact_status(obj: Any) -> Any:
+    """Return a copy of a status value with credentials masked in every string.
+
+    Walks dicts, lists and tuples; ``ffmpeg.redact_text`` masks URL userinfo and
+    ``pwd=``-style values in each string (stderr_tail lines, error text, argv).
+    """
+    if isinstance(obj, str):
+        return redact_text(obj)
+    if isinstance(obj, Mapping):
+        return {key: _redact_status(value) for key, value in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [_redact_status(value) for value in obj]
+    return obj
 
 
 def _json_default(obj: Any) -> Any:
@@ -137,13 +156,13 @@ async def status_json(request: Request) -> JSONResponse:
     rt = rt_provider() if rt_provider else None
     try:
         status = get_runtime_status(rt, cfg) if cfg else make_empty_status()
-        out = dict(normalize_status(status))
+        out = _redact_status(dict(normalize_status(status)))
         out.setdefault("now", time.time())
         return JSONResponse(content=out)
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "now": time.time(), "error": str(e)},
+            content={"ok": False, "now": time.time(), "error": redact_text(str(e))},
         )
 
 
@@ -159,7 +178,7 @@ async def metrics(request: Request) -> Response:
         return Response(content=body, media_type="text/plain; version=0.0.4")
     except Exception as e:
         return Response(
-            content=f"rtsp_warden_metrics_error 1\n# {e}\n",
+            content=f"rtsp_warden_metrics_error 1\n# {redact_text(str(e))}\n",
             media_type="text/plain; charset=utf-8",
             status_code=500,
         )
@@ -176,7 +195,7 @@ async def health(request: Request) -> Response:
     rt_provider = getattr(request.app.state, "runtime_provider", lambda: None)
     rt = rt_provider() if rt_provider else None
 
-    status = (
+    status = _redact_status(
         get_runtime_status(rt, cfg)
         if cfg
         else {"ok": True, "version": __version__, "cameras": [], "errors": []}
@@ -203,7 +222,7 @@ async def health_partial(request: Request) -> HTMLResponse:
     rt_provider = getattr(request.app.state, "runtime_provider", lambda: None)
     rt = rt_provider() if rt_provider else None
 
-    status = (
+    status = _redact_status(
         get_runtime_status(rt, cfg)
         if cfg
         else {"ok": True, "version": __version__, "cameras": [], "errors": []}

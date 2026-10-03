@@ -316,3 +316,11 @@ a.button.outline.secondary {
 .row-actions [role="button"] {
   margin: 0;
 }
+
+/* Camera ingest runs but its proxy (MJPEG preview or MediaMTX) cannot start (RW-2 Task 3). */
+.status-degraded {
+  color: #b26a00;
+}
+[data-theme="dark"] .status-degraded {
+  color: #ffb74d;
+}
