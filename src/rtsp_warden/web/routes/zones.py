@@ -12,7 +12,6 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import ValidationError
@@ -20,8 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ...config import AppConfig, GridZoneConfig, validate_camera_zones
 from ..auth_depends import CurrentUser, require_admin
-from ..config_lock import _locked_write_yaml
-from ..services.detection import write_failed_message
+from ..services.detection import update_config_yaml, write_failed_message
 from ._common import find_camera, get_cfg, get_config_path, templates
 
 log = logging.getLogger(__name__)
@@ -345,24 +343,27 @@ async def reload_zones(
 def _persist_zones(config_path: Path, cfg: AppConfig) -> None:
     """Serialize current AppConfig zones back to config.yaml on disk.
 
-    Uses _locked_write_yaml for crash-safe, locked writes.
+    Reads, changes and writes the raw file as one step (update_config_yaml), so a zone
+    save never drops a detector toggle or a field save made at the same moment.
     """
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    cameras_data = data.get("cameras", [])
-    for i, cam_dict in enumerate(cameras_data):
-        cam_name = cam_dict.get("name")
-        if cam_name is None:
-            continue
-        # Find the matching CameraConfig object
-        for cam_cfg in cfg.cameras:
-            if cam_cfg.name == cam_name:
-                if cam_cfg.zones:
-                    cameras_data[i]["zones"] = [_zone_to_dict(z) for z in cam_cfg.zones]
-                elif "zones" in cameras_data[i]:
-                    del cameras_data[i]["zones"]
-                break
-    data["cameras"] = cameras_data
-    _locked_write_yaml(config_path, data)
+
+    def mutate(data: dict) -> bool:
+        cameras_data = data.get("cameras") or []
+        for cam_dict in cameras_data:
+            if not isinstance(cam_dict, dict) or cam_dict.get("name") is None:
+                continue
+            # Find the matching CameraConfig object
+            for cam_cfg in cfg.cameras:
+                if cam_cfg.name == cam_dict["name"]:
+                    if cam_cfg.zones:
+                        cam_dict["zones"] = [_zone_to_dict(z) for z in cam_cfg.zones]
+                    elif "zones" in cam_dict:
+                        del cam_dict["zones"]
+                    break
+        data["cameras"] = cameras_data
+        return True
+
+    update_config_yaml(config_path, mutate)
 
 
 def _zone_to_dict(zone: GridZoneConfig) -> dict:

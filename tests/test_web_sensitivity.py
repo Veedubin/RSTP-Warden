@@ -18,8 +18,10 @@ from rtsp_warden.auth import hash_password
 from rtsp_warden.config import load_config
 from rtsp_warden.db.engine import reset_engine
 from rtsp_warden.db.schema import create_admin_user, ensure_schema
+from rtsp_warden.detectors.registry import DetectorSpec
 from rtsp_warden.web.app import create_app
 from rtsp_warden.web.config import WebSettings
+from rtsp_warden.web.services import detection as detection_service
 
 # Ensure auth is enabled for tests
 os.environ["WARDEN_AUTH_ENABLED"] = "true"
@@ -290,6 +292,72 @@ class TestSaveSensitivity:
         )
         assert r.status_code == 303
         mock_runtime.rebuild_camera_detectors.assert_called_once_with("front_door")
+
+
+class TestSensitivityForm:
+    """The slider sits inside the POST form, so the browser posts its value (422 fixed)."""
+
+    def test_slider_is_inside_the_form_with_the_current_value(
+        self, client_with_sensitivity: TestClient
+    ) -> None:
+        r = client_with_sensitivity.get("/cameras/front_door/sensitivity")
+        assert r.status_code == 200
+        start = r.text.index('<form method="POST" action="/cameras/front_door/sensitivity"')
+        form = r.text[start : r.text.index("</form>", start)]
+        assert 'type="range"' in form
+        assert 'name="sensitivity"' in form
+        assert 'value="50"' in form
+        assert 'name="csrf_token"' in form
+        assert "x-bind:value" not in r.text
+
+    def test_posting_the_rendered_default_value_saves(
+        self, client_with_sensitivity: TestClient, config_with_sensitivity: Path
+    ) -> None:
+        """What a browser sends when Save is pressed without moving the slider."""
+        csrf = client_with_sensitivity.cookies.get("warden_csrf", "")
+        r = client_with_sensitivity.post(
+            "/cameras/front_door/sensitivity",
+            data={"sensitivity": "50", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        raw = yaml.safe_load(config_with_sensitivity.read_text(encoding="utf-8"))
+        assert raw["cameras"][0]["sensitivity"] == 50
+
+    def test_onnx_mapping_shows_the_threshold_it_uses(
+        self, app_with_sensitivity: tuple, client_with_sensitivity: TestClient
+    ) -> None:
+        _, cfg = app_with_sensitivity
+        cfg.cameras[0].detectors.append(DetectorSpec(type="onnx"))
+        cfg.cameras[0].detectors.append(DetectorSpec(type="onnx", min_confidence=0.6))
+        r = client_with_sensitivity.get("/cameras/front_door/sensitivity")
+        assert r.status_code == 200
+        assert "<td>onnx</td>" in r.text
+        assert "0.50" in r.text  # sensitivity 50 -> confidence 0.5
+        assert "0.60 (set in config.yaml)" in r.text
+
+    def test_write_failure_shows_the_reason_and_keeps_the_value(
+        self,
+        app_with_sensitivity: tuple,
+        client_with_sensitivity: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def refuse(path: Path, data: dict) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(detection_service, "_locked_write_yaml", refuse)
+        _, cfg = app_with_sensitivity
+        csrf = client_with_sensitivity.cookies.get("warden_csrf", "")
+        r = client_with_sensitivity.post(
+            "/cameras/front_door/sensitivity",
+            data={"sensitivity": "65", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 200
+        assert "Permission denied" in r.text
+        assert cfg.cameras[0].sensitivity == 65.0
 
 
 class TestSensitivityAuth:

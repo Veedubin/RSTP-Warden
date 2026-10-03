@@ -7,6 +7,7 @@ auth enforcement, and per-detector enable/disable toggle routes.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -20,6 +21,7 @@ from rtsp_warden.db.engine import reset_engine
 from rtsp_warden.db.schema import create_admin_user, ensure_schema
 from rtsp_warden.web.app import create_app
 from rtsp_warden.web.config import WebSettings
+from rtsp_warden.web.services import detection as detection_service
 
 # Ensure auth is enabled for tests
 os.environ["WARDEN_AUTH_ENABLED"] = "true"
@@ -178,9 +180,24 @@ class TestDetectionClassesPage:
     def test_detection_classes_page_no_filter_shows_all_active(
         self, client_with_classes: TestClient
     ) -> None:
-        """Camera with no detect_classes shows 'All classes active'."""
+        """Camera with no detect_classes: 'All' mode selected and every label box ticked."""
         r = client_with_classes.get("/cameras/backyard/detection-classes")
         assert r.status_code == 200
+        assert "All 80 classes active" in r.text
+        assert 'value="all" checked' in r.text
+        ticked = re.findall(r'<input type="checkbox" name="class_[^"]+"\s+checked', r.text)
+        assert len(ticked) == 80
+
+    def test_detection_classes_page_custom_mode_for_a_list(
+        self, client_with_classes: TestClient
+    ) -> None:
+        """A camera with a class list shows 'custom' mode and ticks exactly that list."""
+        r = client_with_classes.get("/cameras/front_door/detection-classes")
+        assert "3 of 80 classes active" in r.text
+        assert 'value="custom" checked' in r.text
+        ticked = re.findall(r'<input type="checkbox" name="class_([^"]+)"\s+checked', r.text)
+        assert sorted(ticked) == ["car", "dog", "person"]
+        assert "grid-template-columns" not in r.text
 
 
 class TestSaveDetectionClasses:
@@ -276,14 +293,133 @@ class TestSaveDetectionClasses:
         assert "truck" in front_door["detect_classes"]
 
 
+class TestClassesMode:
+    """classes_mode=all restores 'no filter'; posted names are limited to the model's labels."""
+
+    def test_save_mode_all_writes_null(
+        self, client_with_classes: TestClient, config_with_classes: Path
+    ) -> None:
+        csrf = client_with_classes.cookies.get("warden_csrf", "")
+        r = client_with_classes.post(
+            "/cameras/front_door/detection-classes",
+            data={"classes_mode": "all", "class_person": "on", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        raw = yaml.safe_load(config_with_classes.read_text(encoding="utf-8"))
+        front_door = next(c for c in raw["cameras"] if c["name"] == "front_door")
+        assert "detect_classes" in front_door
+        assert front_door["detect_classes"] is None
+        assert load_config(config_with_classes).cameras[0].detect_classes is None
+        r = client_with_classes.get("/cameras/front_door")
+        assert "All classes active (no filter)" in r.text
+
+    def test_save_ignores_names_the_model_does_not_have(
+        self, client_with_classes: TestClient
+    ) -> None:
+        csrf = client_with_classes.cookies.get("warden_csrf", "")
+        r = client_with_classes.post(
+            "/cameras/front_door/detection-classes",
+            data={
+                "classes_mode": "custom",
+                "class_person": "on",
+                "class_unicorn": "on",
+                "csrf_token": csrf,
+            },
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        cam = next(c for c in client_with_classes.app.state.cfg.cameras if c.name == "front_door")
+        assert cam.detect_classes == ["person"]
+
+    def test_onnx_camera_offers_its_model_labels(self, db_with_user: str, tmp_path: Path) -> None:
+        models = tmp_path / "models"
+        (models / "critters").mkdir(parents=True)
+        (models / "critters" / "model.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "critters",
+                    "file": "critters.onnx",
+                    "labels": "labels.txt",
+                    "input_size": [64, 64],
+                    "postprocess": "yolox",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (models / "critters" / "labels.txt").write_text("person\nraccoon\nfox\n", encoding="utf-8")
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "cameras": [
+                        {
+                            "name": "yard",
+                            "main_url": "rtsp://u:p@h/m",
+                            "detect_classes": ["raccoon"],
+                            "detectors": [{"type": "onnx", "model": "critters"}],
+                        }
+                    ],
+                    "runtime": {"models_dir": str(models)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        app = create_app(WebSettings(), cfg=load_config(path), config_path=path)
+        client = TestClient(app)
+        client.get("/login")
+        csrf = client.cookies.get("warden_csrf", "")
+        client.post(
+            "/login", data={"username": "admin", "password": "testpass123", "csrf_token": csrf}
+        )
+        r = client.get("/cameras/yard/detection-classes")
+        assert r.status_code == 200
+        assert "1 of 3 classes active" in r.text
+        assert 'name="class_raccoon"' in r.text
+        assert 'name="class_fox"' in r.text
+        assert "toothbrush" not in r.text
+        assert "Other (2)" in r.text
+
+        r = client.post(
+            "/cameras/yard/detection-classes",
+            data={"class_fox": "on", "class_toothbrush": "on", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert raw["cameras"][0]["detect_classes"] == ["fox"]
+
+    def test_save_reports_a_config_write_failure(
+        self, client_with_classes: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path, data: dict) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(detection_service, "_locked_write_yaml", refuse)
+        csrf = client_with_classes.cookies.get("warden_csrf", "")
+        r = client_with_classes.post(
+            "/cameras/front_door/detection-classes",
+            data={"class_dog": "on", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 200
+        assert "Permission denied" in r.text
+        cam = next(c for c in client_with_classes.app.state.cfg.cameras if c.name == "front_door")
+        assert cam.detect_classes == ["dog"]
+
+
 class TestDetectorEnabledToggle:
-    """Tests for POST /cameras/{name}/detectors/{det_type}/enabled."""
+    """Tests for POST /cameras/{name}/detectors/{index}/enabled (index 0 is the motion spec)."""
 
     def test_disable_detector_redirects_on_success(self, client_with_classes: TestClient) -> None:
         """Disabling a detector redirects (303) to camera detail."""
         csrf = client_with_classes.cookies.get("warden_csrf", "")
         r = client_with_classes.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "false", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
@@ -295,7 +431,7 @@ class TestDetectorEnabledToggle:
         """Disabling a motion detector sets spec.enabled = False."""
         csrf = client_with_classes.cookies.get("warden_csrf", "")
         r = client_with_classes.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "false", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
@@ -333,7 +469,7 @@ class TestDetectorEnabledToggle:
 
         # Now enable it
         r = client.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "true", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
@@ -344,16 +480,49 @@ class TestDetectorEnabledToggle:
         r = client.get("/cameras/front_door/detectors")
         assert r.status_code == 200
 
-    def test_toggle_detector_404_for_unknown_type(self, client_with_classes: TestClient) -> None:
-        """Toggling a detector type that doesn't exist returns 404."""
+    def test_toggle_detector_404_for_unknown_index(self, client_with_classes: TestClient) -> None:
+        """Toggling an index past the end of the detectors list returns 404."""
         csrf = client_with_classes.cookies.get("warden_csrf", "")
         r = client_with_classes.post(
-            "/cameras/front_door/detectors/custom_nonexistent/enabled",
+            "/cameras/front_door/detectors/99/enabled",
             data={"enabled": "true", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
         )
         assert r.status_code == 404
+
+    def test_toggle_detector_422_for_a_type_name(self, client_with_classes: TestClient) -> None:
+        """The old type-keyed URL is gone: a non-integer index is a 422."""
+        csrf = client_with_classes.cookies.get("warden_csrf", "")
+        r = client_with_classes.post(
+            "/cameras/front_door/detectors/motion/enabled",
+            data={"enabled": "true", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 422
+
+    def test_toggle_by_index_leaves_other_detectors_alone(
+        self, client_with_classes: TestClient, config_with_classes: Path
+    ) -> None:
+        """Disabling index 2 (dnn) keeps motion and person enabled, in memory and on disk."""
+        csrf = client_with_classes.cookies.get("warden_csrf", "")
+        r = client_with_classes.post(
+            "/cameras/front_door/detectors/2/enabled",
+            data={"enabled": "false", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        app = client_with_classes.app
+        cam = next(c for c in app.state.cfg.cameras if c.name == "front_door")
+        assert [d.enabled for d in cam.detectors] == [True, True, False]
+        raw = yaml.safe_load(config_with_classes.read_text(encoding="utf-8"))
+        front_door = next(c for c in raw["cameras"] if c["name"] == "front_door")
+        assert [d.get("enabled") for d in front_door["detectors"]] == [True, True, False]
+        assert front_door["detectors"][2]["config"] == {
+            "classes": ["person", "dog", "car", "truck"]
+        }
 
     def test_toggle_detector_calls_rebuild_with_mocked_runtime(
         self, app_with_classes: tuple
@@ -377,7 +546,7 @@ class TestDetectorEnabledToggle:
         assert r.status_code == 303
 
         r = client.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "false", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
@@ -409,7 +578,7 @@ class TestDetectorEnabledToggle:
         assert r.status_code == 303
 
         r = client.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "false", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,
@@ -462,7 +631,7 @@ class TestDetectionClassesAuth:
         client = TestClient(app)
         csrf = client.get("/login").cookies.get("warden_csrf", "")
         r = client.post(
-            "/cameras/front_door/detectors/motion/enabled",
+            "/cameras/front_door/detectors/0/enabled",
             data={"enabled": "false", "csrf_token": csrf},
             headers={"X-CSRF-Token": csrf},
             follow_redirects=False,

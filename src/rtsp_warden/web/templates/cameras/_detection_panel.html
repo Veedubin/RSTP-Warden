@@ -1,0 +1,12 @@
+{# Detection panel (RW-3 Task 15), included by cameras/detail.html in place of the old
+   detectors article. The body is partials/detection_panel.html, loaded by htmx from
+   GET /cameras/{name}/detection, so the camera_detail route needs no extra context. #}
+<section id="detection-panel"
+         hx-get="/cameras/{{ camera.name }}/detection"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+  <article>
+    <header>Detection</header>
+    <p aria-busy="true">Loading detection settings...</p>
+  </article>
+</section>

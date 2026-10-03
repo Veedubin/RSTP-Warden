@@ -1,0 +1,37 @@
+{# Answer of POST /cameras/{name}/rules/test (RW-3 Task 15), swapped into #rules-test-result. #}
+<article class="rules-test-result">
+  <p>
+    <strong>Test event #{{ result.event_id }}</strong> created
+    (<a href="/events/{{ result.event_id }}">open</a>).
+    {% if not result.thumbnail_path %}<small>The placeholder picture could not be written.</small>{% endif %}
+  </p>
+  {% if not rule_count %}
+  <p>This camera has no rules, so no action ran. Add rules under this camera in <code>config.yaml</code>.</p>
+  {% else %}
+    {% if result.decision.matched %}
+    <p>Matched rules:</p>
+    <ul>
+      {% for match in result.decision.matched %}
+      <li><strong>{{ match.rule.name }}</strong>{% if match.actions %} &rarr; {{ match.actions | join(', ') }}{% else %} (no actions){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No rule matched this test event.</p>
+    {% endif %}
+    {% if result.decision.reasons %}
+    <p>Not matched:</p>
+    <ul>
+      {% for rule_name, why in result.decision.reasons.items() %}
+      <li><strong>{{ rule_name }}</strong>: {{ why }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  {% endif %}
+  {% if result.queued %}
+  <p>
+    Sent to the action queue: <strong>{{ result.queued | join(', ') }}</strong>.
+    Delivery results appear on the <a href="/events/{{ result.event_id }}">event page</a>.
+  </p>
+  {% endif %}
+  {% if result.note %}<p><small>{{ result.note }}</small></p>{% endif %}
+</article>

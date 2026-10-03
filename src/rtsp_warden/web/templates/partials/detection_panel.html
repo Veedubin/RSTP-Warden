@@ -1,0 +1,122 @@
+{# Detection panel body (RW-3 Task 15): GET /cameras/{name}/detection and the htmx answer
+   of POST /cameras/{name}/detection. Swapped into #detection-panel. #}
+<article class="detection-panel">
+  <header>Detection</header>
+  {% if message %}<p class="detection-message" role="status">{{ message }}</p>{% endif %}
+  {% if error %}<p class="detection-error" role="alert">{{ error }}</p>{% endif %}
+
+  {% if is_admin %}
+  <form method="POST" action="/cameras/{{ camera_name }}/detection"
+        hx-post="/cameras/{{ camera_name }}/detection"
+        hx-target="#detection-panel"
+        hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token"
+           value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    <div class="grid">
+      <label for="detect-fps">
+        Detect fps
+        <input id="detect-fps" name="detect_fps" type="number" required step="any"
+               min="{{ '%g'|format(detect_fps_min) }}" max="{{ '%g'|format(detect_fps_max) }}"
+               value="{{ '%g'|format(cam.detect_fps) }}">
+      </label>
+      <label for="track-grace">
+        Track grace (seconds)
+        <input id="track-grace" name="track_grace_seconds" type="number" required step="any"
+               min="0.1" value="{{ '%g'|format(cam.track_grace_seconds) }}">
+      </label>
+      <label for="min-track-frames">
+        Min track frames
+        <input id="min-track-frames" name="min_track_frames" type="number" required step="1"
+               min="1" value="{{ cam.min_track_frames }}">
+      </label>
+    </div>
+    <button type="submit">Save detection settings</button>
+    <small class="detection-note">Changing detect fps restarts this camera's ingest: recording pauses for a few seconds.</small>
+  </form>
+  {% else %}
+  <p>
+    Detect fps <strong>{{ '%g'|format(cam.detect_fps) }}</strong>
+    &middot; track grace {{ '%g'|format(cam.track_grace_seconds) }} s
+    &middot; min track frames {{ cam.min_track_frames }}
+  </p>
+  {% endif %}
+
+  {% if status %}
+  <p class="detection-status"><small>
+    {{ status.get('frames_processed', 0) }} frames analysed,
+    {{ status.get('frames_dropped', 0) }} dropped because detection fell behind
+    {% if status.get('restart_pending') %}&middot; <mark>ingest restart pending</mark>{% endif %}
+  </small></p>
+  {% else %}
+  <p class="detection-status"><small>Detection is not running for this camera.</small></p>
+  {% endif %}
+
+  <h4>Detectors</h4>
+  <div id="detector-list"
+       hx-get="/cameras/{{ camera_name }}/detectors"
+       hx-trigger="every 10s [!this.contains(document.activeElement)]"
+       hx-swap="innerHTML">
+    {% include "partials/detector_list.html" %}
+  </div>
+
+  <h4>Classes and zones</h4>
+  <p>
+    Classes:
+    {% if cam.detect_classes is none %}all labels of the model
+    {% elif cam.detect_classes %}{{ cam.detect_classes | join(', ') }}
+    {% else %}none (object detectors report nothing){% endif %}
+    {% if is_admin %}&middot; <a href="/cameras/{{ camera_name }}/detection-classes">Edit classes</a>{% endif %}
+  </p>
+  <p>
+    Zones: {% if zone_count %}{{ zone_count }} configured{% else %}none (whole frame){% endif %}
+    {% if is_admin %}&middot; <a href="/cameras/{{ camera_name }}/zones">Edit zones</a>{% endif %}
+  </p>
+
+  <h4>Rules</h4>
+  {% if cam.rules %}
+  <div class="table-wrap">
+    <table class="rules-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Labels</th><th>Zones</th><th>Min confidence</th>
+          <th>Between</th><th>Cooldown</th><th>Clip</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rule in cam.rules %}
+        <tr>
+          <td>{{ rule.name }}</td>
+          <td>{{ rule.labels | join(', ') if rule.labels else 'any' }}</td>
+          <td>{{ rule.zones | join(', ') if rule.zones else 'any' }}</td>
+          <td>{{ '%.2f'|format(rule.min_confidence) }}</td>
+          <td>{{ rule.between or 'any time' }}</td>
+          <td>{{ '%g'|format(rule.cooldown_seconds) }} s</td>
+          <td>{{ 'yes' if rule.clip else 'no' }}</td>
+          <td>{{ rule.actions | join(', ') if rule.actions else 'none' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p><small>Rules are edited in <code>config.yaml</code>.</small></p>
+  {% else %}
+  <p>No rules yet. Rules decide which events run actions; add them under this camera in <code>config.yaml</code>:</p>
+  <pre><code>    rules:
+      - name: person-any-time
+        labels: [person]
+        actions: [phone]</code></pre>
+  {% endif %}
+
+  {% if is_admin %}
+  <form method="POST" action="/cameras/{{ camera_name }}/rules/test"
+        hx-post="/cameras/{{ camera_name }}/rules/test"
+        hx-target="#rules-test-result"
+        hx-swap="innerHTML">
+    <input type="hidden" name="csrf_token"
+           value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    <button type="submit" class="secondary">Fire test event</button>
+    <small class="detection-note">Creates a test "person" event with a placeholder picture and runs it through the rules and their actions.</small>
+  </form>
+  <div id="rules-test-result" aria-live="polite"></div>
+  {% endif %}
+</article>

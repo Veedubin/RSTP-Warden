@@ -4,21 +4,41 @@
 {% block content %}
 <hgroup>
   <h1>Detection classes for {{ camera_name }}</h1>
-  <p>{{ active_classes|length }} of {{ all_classes|length }} classes active</p>
+  <p>
+    {% if classes_mode == 'all' %}All {{ all_classes|length }} classes active
+    {% else %}{{ active_classes|length }} of {{ all_classes|length }} classes active{% endif %}
+  </p>
 </hgroup>
 
-<article>
-  <header>Active classes</header>
-  <p>Only checked classes trigger detection events on this camera.</p>
+{% if error %}<p class="detection-error" role="alert">{{ error }}</p>{% endif %}
 
-  <form method="POST" action="/cameras/{{ camera_name }}/detection-classes">
+<article>
+  <header>Labels that create events</header>
+  <p>
+    {% if has_onnx %}These are the labels of this camera's object detection model.
+    {% else %}This camera has no <code>onnx</code> detector, so the list shows the default model's labels.{% endif %}
+    Motion events are not filtered by class.
+  </p>
+
+  <form method="POST" action="/cameras/{{ camera_name }}/detection-classes" id="classes-form">
     <input type="hidden" name="csrf_token"
            value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
 
+    <fieldset>
+      <label>
+        <input type="radio" name="classes_mode" value="all" {% if classes_mode == 'all' %}checked{% endif %}>
+        All labels (no filter)
+      </label>
+      <label>
+        <input type="radio" name="classes_mode" value="custom" {% if classes_mode == 'custom' %}checked{% endif %}>
+        Only the labels ticked below
+      </label>
+    </fieldset>
+
     {% for category_name, classes in class_groups %}
-    <details {% if category_name == "person" or category_name == "vehicle" %}open{% endif %}>
-      <summary role="button" class="secondary outline">{{ category_name | capitalize }}</summary>
-      <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));">
+    <details {% if category_name in ('person', 'vehicle') %}open{% endif %}>
+      <summary role="button" class="secondary outline">{{ category_name | capitalize }} ({{ classes|length }})</summary>
+      <div class="class-grid">
         {% for cls_name in classes %}
         <label>
           <input type="checkbox" name="class_{{ cls_name }}"
@@ -31,7 +51,11 @@
     </details>
     {% endfor %}
 
-    <div class="grid" style="margin-top: 1rem;">
+    <div class="grid">
+      <button type="button" class="secondary outline" onclick="wardenSetClasses(true)">Tick all</button>
+      <button type="button" class="secondary outline" onclick="wardenSetClasses(false)">Clear all</button>
+    </div>
+    <div class="grid">
       <button type="submit">Save</button>
       <a href="/cameras/{{ camera_name }}" role="button" class="secondary">Cancel</a>
       <button type="submit" name="action" value="save_and_reload" class="contrast">Save + Reload Detectors</button>
@@ -39,21 +63,22 @@
   </form>
 </article>
 
-<article>
-  <header>Select all / Clear all</header>
-  <div class="grid">
-    <script>
-      function selectAll() {
-        document.querySelectorAll('input[type="checkbox"][name^="class_"]').forEach(function(cb) { cb.checked = true; });
-      }
-      function clearAll() {
-        document.querySelectorAll('input[type="checkbox"][name^="class_"]').forEach(function(cb) { cb.checked = false; });
-      }
-    </script>
-    <button type="button" onclick="selectAll()" class="secondary">Select all</button>
-    <button type="button" onclick="clearAll()" class="secondary">Clear all</button>
-  </div>
-</article>
+<script>
+  // Ticking or clearing a label means "only these labels": switch the mode radio to custom.
+  function wardenUseCustomClasses() {
+    var custom = document.querySelector('#classes-form input[name="classes_mode"][value="custom"]');
+    if (custom) { custom.checked = true; }
+  }
+  function wardenSetClasses(checked) {
+    document.querySelectorAll('#classes-form input[type="checkbox"][name^="class_"]').forEach(function (cb) {
+      cb.checked = checked;
+    });
+    wardenUseCustomClasses();
+  }
+  document.getElementById('classes-form').addEventListener('change', function (evt) {
+    if (evt.target.name && evt.target.name.indexOf('class_') === 0) { wardenUseCustomClasses(); }
+  });
+</script>
 
 <p><a href="/cameras/{{ camera_name }}">&larr; Back to camera</a></p>
 {% endblock %}

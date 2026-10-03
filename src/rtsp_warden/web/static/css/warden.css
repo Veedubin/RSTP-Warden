@@ -216,3 +216,26 @@
 .action-failed {
   color: #c62828;
 }
+
+.detection-message { color: #2e7d32; }
+.detection-error, .detector-error { color: #c62828; word-break: break-word; }
+.detector-warning { color: #b26a00; }
+.detection-note { display: block; margin-top: 0.25rem; color: var(--pico-muted-color, #777); }
+.detector-row.disabled { opacity: 0.6; }
+.device-badge, .detector-deprecated {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid var(--pico-muted-border-color, #ccc);
+  border-radius: 0.25rem;
+  font-size: 0.8em;
+}
+.detector-deprecated { color: #b26a00; }
+.class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.25rem 1rem;
+}
+.sensitivity-more { text-align: right; }
+.detector-fps-form { display: flex; gap: 0.25rem; margin: 0; }
+.detector-fps-form input[type="number"] { width: 5.5rem; margin: 0; }
+.detector-fps-form button { margin: 0; padding: 0.25rem 0.6rem; }

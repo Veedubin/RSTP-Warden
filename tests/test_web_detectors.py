@@ -139,11 +139,21 @@ class TestCameraDetectors:
     """Tests for camera detector display and partials."""
 
     def test_camera_detail_loads_detectors(self, client_with_detectors: TestClient) -> None:
-        """Camera with 1 motion detector: detail page shows detector section."""
+        """Camera with 1 motion detector: detail page loads the Detection panel."""
         r = client_with_detectors.get("/cameras/driveway")
         assert r.status_code == 200
-        # The htmx container for detectors should be present
-        assert "/cameras/driveway/detectors" in r.text
+        # The htmx container of the Detection panel (RW-3 Task 15) should be present
+        assert 'hx-get="/cameras/driveway/detection"' in r.text
+
+    def test_detection_panel_contains_the_detector_list(
+        self, client_with_detectors: TestClient
+    ) -> None:
+        """The panel renders the detector table and polls the detector partial."""
+        r = client_with_detectors.get("/cameras/driveway/detection")
+        assert r.status_code == 200
+        assert 'hx-get="/cameras/driveway/detectors"' in r.text
+        assert "min_area=500" in r.text
+        assert "/cameras/driveway/detectors/0/enabled" in r.text
 
     def test_camera_detectors_partial(self, client_with_detectors: TestClient) -> None:
         """GET /cameras/{name}/detectors (htmx) returns detector info."""
@@ -158,6 +168,13 @@ class TestCameraDetectors:
         assert r.status_code == 200
         assert "No detectors configured" in r.text
         assert "config.yaml" in r.text
+
+    def test_detector_partial_404_for_unknown_camera(
+        self, client_with_detectors: TestClient
+    ) -> None:
+        """GET /cameras/{name}/detectors for a camera that is not configured -> 404."""
+        r = client_with_detectors.get("/cameras/nonexistent/detectors")
+        assert r.status_code == 404
 
     def test_detector_partial_requires_auth(self, app_with_detectors: tuple) -> None:
         """GET /cameras/{name}/detectors without auth -> 401/302."""

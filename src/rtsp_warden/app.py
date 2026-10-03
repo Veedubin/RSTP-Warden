@@ -162,6 +162,8 @@ class AppRuntime:
     _clip_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     # The ingest restart each camera last requested because its frame tap had to change.
     _tap_restarts: dict[str, Future[None]] = field(default_factory=dict, init=False, repr=False)
+    # Threads tearing down runners a rebuild swapped out (see _retire_runners).
+    _retiring: list[threading.Thread] = field(default_factory=list, init=False, repr=False)
     _event_sink: EventSink | None = field(default=None, init=False, repr=False)
     _detector_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     # Lifecycle requests posted from any thread and applied by run_forever on the main thread.
@@ -635,6 +637,9 @@ class AppRuntime:
                 runner.teardown()
             except Exception:
                 pass
+        # ...and wait for the runners earlier rebuilds swapped out (they close their events).
+        for thread in list(self._retiring):
+            thread.join(timeout=5.0)
 
         for rt in self.cameras:
             self._stop_camera(rt)
@@ -738,7 +743,9 @@ class AppRuntime:
 
         The new runner is set up first, then swapped into ``detector_runners`` and onto the
         camera's own dispatcher under ``_detector_lock``, so the tap never feeds a stopped
-        runner; the old runner is torn down afterwards. Without enabled detectors the
+        runner; the old runner is torn down afterwards, on a background thread
+        (``_retire_runners``) so a worker stuck in a model download never holds the
+        caller. Without enabled detectors the
         dispatcher keeps only the --frame-consumer consumers. When the frame tap the camera
         needs changed (detect_fps, a wider model input, a first detector on a camera without
         an ingest), one ingest restart is requested; run_forever applies it (R18).
@@ -769,14 +776,38 @@ class AppRuntime:
                 self.detector_runners.append(new_runner)
             self._set_consumers(cam_rt, new_runner)
 
-        for r in old_runners:
-            try:
-                r.teardown()
-            except Exception:
-                log.warning("detector runner teardown failed for %s", camera_name, exc_info=True)
+        if old_runners:
+            self._retire_runners(old_runners, camera_name)
 
         if not from_lifecycle:
             self._request_restart_if_tap_changed(cam_rt)
+
+    def _retire_runners(self, runners: list[DetectorRunner], camera_name: str) -> None:
+        """Tear runners a rebuild swapped out down on a daemon thread.
+
+        A runner's teardown joins its worker (up to 5 s) and then closes its open events.
+        A worker stuck in a model download would otherwise hold the web request (or the
+        supervisor tick) that rebuilt the camera for those seconds. The runners are off
+        the camera's dispatcher already, so they get no new frames; stop_all() joins the
+        teardowns that are still running.
+        """
+
+        def teardown_all() -> None:
+            for runner in runners:
+                try:
+                    runner.teardown()
+                except Exception:
+                    log.warning(
+                        "detector runner teardown failed for %s", camera_name, exc_info=True
+                    )
+
+        thread = threading.Thread(
+            target=teardown_all, name=f"detector-teardown:{camera_name}", daemon=True
+        )
+        with self._detector_lock:
+            self._retiring = [t for t in self._retiring if t.is_alive()]
+            self._retiring.append(thread)
+        thread.start()
 
     # ------------------------------------------------------------------
     # Detection wiring: frame tap, events -> rules -> actions and clips

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from rtsp_warden.web.routes.cameras import _persist_camera_field
+from rtsp_warden.web.services.detection import _persist_camera_field
 
 
 def test_persist_only_touches_named_camera(tmp_path: Path):

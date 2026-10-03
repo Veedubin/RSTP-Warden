@@ -57,12 +57,8 @@
   </table>
 </article>
 
-{# Detectors #}
-<article hx-get="/cameras/{{ camera.name }}/detectors"
-         hx-trigger="load, every 10s"
-         hx-swap="innerHTML">
-  <p>Loading detectors...</p>
-</article>
+{# Detection (RW-3) #}
+{% include "cameras/_detection_panel.html" %}
 
 {# Retention #}
 <article>

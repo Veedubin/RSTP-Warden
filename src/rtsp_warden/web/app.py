@@ -24,6 +24,7 @@ from .routes.actions import router as actions_router
 from .routes.auth import router as auth_router
 from .routes.cameras import router as cameras_router
 from .routes.dashboard import router as dashboard_router
+from .routes.detection import router as detection_router
 from .routes.events import router as events_router
 from .routes.health import router as health_router
 from .routes.htl import router as htl_router
@@ -98,6 +99,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(dashboard_router)
     app.include_router(cameras_router)
+    app.include_router(detection_router)
     app.include_router(events_router)
     app.include_router(health_router)
     app.include_router(htl_router)

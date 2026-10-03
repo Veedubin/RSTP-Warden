@@ -1,54 +1,91 @@
+{# Detector table of one camera (RW-3 Task 15). Rendered inside the Detection panel's
+   #detector-list and by GET /cameras/{name}/detectors (polled every 10 s). Rows and
+   toggles are keyed by the detector's index in config.yaml. #}
+{% if list_message %}<p class="detection-error" role="alert">{{ list_message }}</p>{% endif %}
 {% if detectors %}
-<article>
-  <header>Detectors</header>
+<div class="table-wrap">
   <table class="detector-table">
     <thead>
-      <tr><th>Type</th><th>Enabled</th><th>Interval</th><th>Config</th><th>Toggle</th></tr>
+      <tr>
+        <th>#</th><th>Type</th><th>Model</th><th>Fps</th><th>Device</th><th>Status</th><th>Settings</th>
+        {% if is_admin %}<th>Enabled</th>{% endif %}
+      </tr>
     </thead>
     <tbody>
       {% for d in detectors %}
-      <tr class="detector-row {% if not d.enabled %}disabled{% endif %}">
-        <td><span class="detector-type detector-{{ d.type }}">{{ d.type }}</span></td>
-        <td>{{ "yes" if d.enabled else "no" }}</td>
-        <td>{{ d.interval_seconds }}s</td>
-        <td><code>{{ d.summary_str }}</code></td>
+      <tr class="detector-row{% if not d.enabled %} disabled{% endif %}" id="detector-{{ d.index }}">
+        <td>{{ d.index }}</td>
         <td>
-          <form method="POST" action="/cameras/{{ camera_name }}/detectors/{{ d.type }}/enabled"
-                style="display:inline"
-                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.type }}/enabled"
-                hx-headers='{"X-CSRF-Token": "{{ request.state.csrf_token if request.state.csrf_token else '' }}"}'>
+          <span class="detector-type detector-{{ d.type }}">{{ d.type }}</span>
+          {% if d.deprecated %}<small class="detector-deprecated" title="Deprecated: use type onnx">deprecated</small>{% endif %}
+        </td>
+        <td>{{ d.model or '-' }}</td>
+        <td>
+          {% if is_admin %}
+          <form class="detector-fps-form" method="POST"
+                action="/cameras/{{ camera_name }}/detectors/{{ d.index }}/fps"
+                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.index }}/fps"
+                hx-target="#detector-list"
+                hx-swap="innerHTML">
+            <input type="hidden" name="csrf_token"
+                   value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <input type="number" name="fps" min="0.1" max="{{ detect_fps }}" step="0.1"
+                   value="{{ '%g' % d.spec_fps if d.spec_fps is not none else '' }}"
+                   placeholder="{{ '%g' % detect_fps }}"
+                   aria-label="Frames per second for detector {{ d.index }} (empty: the camera's {{ '%g' % detect_fps }})">
+            <button type="submit" class="outline secondary">Set</button>
+          </form>
+          {% else %}{{ d.fps_label }}{% endif %}
+        </td>
+        <td>{% if d.device %}<span class="device-badge">{{ d.device }}</span>{% else %}-{% endif %}</td>
+        <td>
+          {% if not d.enabled %}off
+          {% elif d.error %}<span class="detector-error">{{ d.error }}</span>
+          {% elif d.provider %}<span class="device-badge">{{ d.provider_label }}</span>
+            {% if d.fallback_warning %}<br><small class="detector-warning">{{ d.fallback_warning }}</small>{% endif %}
+          {% elif d.running %}running
+          {% else %}not running{% endif %}
+          {% if d.running %}<br><small>{{ d.processed }} frames, {{ d.skipped }} skipped{% if d.errors %}, {{ d.errors }} errors{% endif %}</small>{% endif %}
+        </td>
+        <td>
+          <code>{{ d.summary_str }}</code>
+          {% if d.type == 'motion' %}<br><small>motion events {{ 'on' if d.motion_events else 'off' }}</small>{% endif %}
+        </td>
+        {% if is_admin %}
+        <td>
+          <form method="POST" action="/cameras/{{ camera_name }}/detectors/{{ d.index }}/enabled"
+                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.index }}/enabled"
+                hx-target="#detector-list"
+                hx-swap="innerHTML">
             <input type="hidden" name="csrf_token"
                    value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
             <input type="hidden" name="enabled" value="{{ 'false' if d.enabled else 'true' }}">
-            <button type="submit" class="{% if d.enabled %}secondary{% else %}contrast{% endif %} outline"
-                    style="display:inline">
+            <button type="submit" class="{% if d.enabled %}secondary{% else %}contrast{% endif %} outline">
               {{ 'Disable' if d.enabled else 'Enable' }}
             </button>
           </form>
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  {% if has_roi or has_masks %}
-  <footer>
-    <small>
-      {% if has_roi %}ROI configured. {% endif %}
-      {% if has_masks %}{{ num_masks }} privacy mask(s).{% endif %}
-    </small>
-  </footer>
-  {% endif %}
-</article>
+</div>
+{% if has_roi or has_masks %}
+<p><small>
+  {% if has_roi %}ROI configured. {% endif %}
+  {% if has_masks %}{{ num_masks }} privacy mask(s).{% endif %}
+</small></p>
+{% endif %}
 {% else %}
-<article>
-  <header>No detectors configured</header>
-  <p>Add detectors to this camera in <code>config.yaml</code> and restart <code>rtsp-warden serve</code>.</p>
-  <pre><code>cameras:
+<p><strong>No detectors configured</strong></p>
+<p>Add detectors to this camera in <code>config.yaml</code> and restart <code>rtsp-warden serve</code>.</p>
+<pre><code>cameras:
   - name: {{ camera_name }}
+    detect_fps: 5
     detectors:
       - type: motion
-        enabled: true
-        interval_seconds: 1.0
-        min_area: 500</code></pre>
-</article>
+      - type: onnx
+        model: yolox-s
+        fps: 2</code></pre>
 {% endif %}

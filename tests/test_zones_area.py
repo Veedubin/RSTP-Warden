@@ -475,12 +475,12 @@ def test_zone_kind_partial_defaults_to_ignore() -> None:
 
 
 def _read_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    import rtsp_warden.web.routes.zones as zones_mod
+    import rtsp_warden.web.services.detection as detection_service
 
     def fail(path: Path, data: object) -> None:
         raise OSError(30, "Read-only file system")
 
-    monkeypatch.setattr(zones_mod, "_locked_write_yaml", fail)
+    monkeypatch.setattr(detection_service, "_locked_write_yaml", fail)
 
 
 def test_save_zone_write_failure_names_the_path(
