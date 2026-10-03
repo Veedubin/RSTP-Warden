@@ -3,7 +3,7 @@
 /* --- Camera card grid --- */
 .camera-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 1rem;
 }
 
@@ -34,21 +34,21 @@
   vertical-align: middle;
   margin-left: 0.5rem;
 }
-.status-ok {
+.status-dot.status-ok {
   background-color: #4caf50;
 }
-.status-warning,
-.status-yellow {
+.status-dot.status-warning,
+.status-dot.status-yellow {
   background-color: #ff9800;
 }
-.status-error,
-.status-red {
+.status-dot.status-error,
+.status-dot.status-red {
   background-color: #f44336;
 }
-.status-unknown {
-  background-color: #9e9e9e;
-}
-.status-stopped {
+.status-dot.status-unknown,
+.status-dot.status-stopped,
+.status-dot.status-idle,
+.status-dot.status-waiting {
   background-color: #9e9e9e;
 }
 
@@ -129,3 +129,177 @@
 .status-dot.status-restarting { background: #b26a00; }
 .status-dot.status-failed { background: #c62828; }
 .camera-error { color: #c62828; word-break: break-word; }
+
+/* --- Layout primitives (UI shell) --- */
+
+/* Top nav: wrap onto a second line instead of overflowing; mark the current page. */
+.site-nav,
+.site-nav > ul {
+  flex-wrap: wrap;
+}
+.site-nav a[aria-current="page"] {
+  font-weight: 600;
+}
+.site-nav details.dropdown form {
+  margin: 0;
+}
+.site-nav details.dropdown button {
+  width: 100%;
+  margin: 0;
+}
+
+/* Page header (partials/page_header.html): title and subtitle left, actions right. */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: var(--pico-spacing);
+}
+.page-header hgroup {
+  margin-bottom: 0;
+}
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.page-actions > * {
+  margin-bottom: 0;
+}
+
+/* Flash messages (partials/flash.html). */
+.flash {
+  --flash-accent: #1565c0;
+  --flash-bg: rgba(21, 101, 192, 0.1);
+  margin-bottom: var(--pico-spacing);
+  padding: 0.75rem 1rem;
+  border-left: 0.25rem solid var(--flash-accent);
+  border-radius: var(--pico-border-radius);
+  background: var(--flash-bg);
+}
+.flash-success {
+  --flash-accent: #2e7d32;
+  --flash-bg: rgba(46, 125, 50, 0.12);
+}
+.flash-error {
+  --flash-accent: #c62828;
+  --flash-bg: rgba(198, 40, 40, 0.12);
+}
+
+/* Wide tables scroll sideways inside their box instead of widening the page. */
+.table-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--pico-spacing);
+}
+.table-wrap > table {
+  margin-bottom: 0;
+}
+
+/* Status badge: outlined pill; colour from .status-running/-restarting/-failed/-idle/-waiting. */
+.status-badge {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Small text, and compact buttons with class="small". */
+.small {
+  font-size: 0.875em;
+}
+:is(button, [role="button"], [type="submit"], a.button).small {
+  --pico-form-element-spacing-vertical: 0.25rem;
+  --pico-form-element-spacing-horizontal: 0.6rem;
+  font-size: 0.875rem;
+}
+
+/* Visually hidden but read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* One labelled form control plus optional help text. */
+.field {
+  margin-bottom: var(--pico-spacing);
+}
+.field :is(input, select, textarea) {
+  margin-bottom: 0.25rem;
+}
+.field > small {
+  display: block;
+  color: var(--pico-muted-color);
+}
+
+/* Links with class="button" (Pico 2 itself styles only role="button"). */
+a.button {
+  display: inline-block;
+  padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal);
+  border: var(--pico-border-width) solid var(--pico-primary-border);
+  border-radius: var(--pico-border-radius);
+  background-color: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+  font-weight: var(--pico-font-weight);
+  line-height: var(--pico-line-height);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.button.secondary {
+  border-color: var(--pico-secondary-border);
+  background-color: var(--pico-secondary-background);
+  color: var(--pico-secondary-inverse);
+}
+a.button.outline {
+  background-color: transparent;
+  color: var(--pico-primary);
+}
+a.button.outline.secondary {
+  color: var(--pico-secondary);
+}
+
+/* Dark theme: lighter status colours so labels stay readable. */
+[data-theme="dark"] .status-running {
+  color: #81c784;
+}
+[data-theme="dark"] .status-restarting {
+  color: #ffb74d;
+}
+[data-theme="dark"] .status-failed,
+[data-theme="dark"] .camera-error {
+  color: #ef9a9a;
+}
+
+/* Phones. Pico already stacks .grid below 768 px; !important also beats inline
+   grid-template-columns. Tables get tighter cells, form submit buttons go full width. */
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: 1fr !important;
+  }
+  table {
+    font-size: 0.875rem;
+  }
+  th,
+  td {
+    padding: 0.4rem 0.5rem;
+  }
+  .page-header {
+    align-items: flex-start;
+  }
+  form > button[type="submit"] {
+    width: 100%;
+  }
+}

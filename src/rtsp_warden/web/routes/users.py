@@ -10,7 +10,6 @@ import re
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.templating import Jinja2Templates
 
 from ... import auth
 from ...db import (
@@ -24,11 +23,9 @@ from ...db import (
 )
 from ..auth_depends import CurrentUser, require_admin
 from ..csrf import check_csrf_form
-from ..paths import TEMPLATES_DIR
+from ._common import templates
 
 router = APIRouter(prefix="/users")
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Valid username: 3-32 chars, alphanumeric + underscore
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
@@ -39,7 +36,7 @@ _MIN_PASSWORD_LEN = 8
 async def users_list(request: Request, user: CurrentUser = Depends(require_admin)) -> HTMLResponse:
     """Render the user list page (admin-only)."""
     all_users = list_users()
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "users/list.html",
         {
@@ -55,7 +52,7 @@ async def new_user_form(
     request: Request, user: CurrentUser = Depends(require_admin)
 ) -> HTMLResponse:
     """Render the new user creation form."""
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "users/new.html",
         {
@@ -105,7 +102,7 @@ async def create_new_user(
         password = generated_password
 
     if errors:
-        return _templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
             "users/new.html",
             {
@@ -122,7 +119,7 @@ async def create_new_user(
     admin_flag = is_admin == "on"
     new = create_user(username=username, password_hash=pw_hash, is_admin=admin_flag)
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "users/new.html",
         {
@@ -146,7 +143,7 @@ async def reset_password_form(
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "users/reset_password.html",
         {
@@ -179,7 +176,7 @@ async def reset_password_submit(
     # Re-fetch to get updated data
     target = get_user_by_id(user_id)
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "users/reset_password.html",
         {

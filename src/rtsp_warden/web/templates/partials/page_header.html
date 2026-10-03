@@ -1,0 +1,14 @@
+{#
+  Page header. Set the variables, then include, inside {% block content %}:
+    {% set title = "Cameras" %}
+    {% set subtitle = "2 configured" %}                      (optional)
+    {% set header_actions %}<a href="/cameras/new" role="button">Add camera</a>{% endset %}   (optional)
+    {% include "partials/page_header.html" %}
+#}
+<header class="page-header">
+  <hgroup>
+    <h1>{{ title }}</h1>
+    {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
+  </hgroup>
+  {% if header_actions %}<div class="page-actions">{{ header_actions }}</div>{% endif %}
+</header>

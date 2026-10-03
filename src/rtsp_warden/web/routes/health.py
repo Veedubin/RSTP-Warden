@@ -14,16 +14,13 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-from starlette.templating import Jinja2Templates
 
 from ... import __version__
 from ...status_model import make_empty_status, normalize_status
-from ..paths import TEMPLATES_DIR
 from ..services.runtime import get_runtime_status
+from ._common import templates
 
 router = APIRouter()
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 def _json_default(obj: Any) -> Any:
@@ -189,13 +186,12 @@ async def health(request: Request) -> Response:
     if "application/json" in accept:
         return JSONResponse(content=status)
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "health.html",
         {
             "request": request,
             "status": status,
-            "version": status.get("version", __version__),
         },
     )
 
@@ -213,7 +209,7 @@ async def health_partial(request: Request) -> HTMLResponse:
         else {"ok": True, "version": __version__, "cameras": [], "errors": []}
     )
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "partials/health_status.html",
         {

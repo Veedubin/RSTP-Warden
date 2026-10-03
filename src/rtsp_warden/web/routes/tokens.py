@@ -8,24 +8,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from starlette.templating import Jinja2Templates
 
 from ... import auth
 from ...db import get_user_by_id
 from ..auth_depends import CurrentUser, require_user
 from ..csrf import check_csrf_form
-from ..paths import TEMPLATES_DIR
+from ._common import templates
 
 router = APIRouter(prefix="/api-tokens")
-
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @router.get("", response_class=HTMLResponse)
 async def tokens_list(request: Request, user: CurrentUser = Depends(require_user)) -> HTMLResponse:
     """Render the API tokens list page for the current user."""
     tokens = auth.list_api_tokens(user.user_id)
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "tokens/list.html",
         {
@@ -67,7 +64,7 @@ async def create_token(
 
     if errors:
         tokens = auth.list_api_tokens(user.user_id)
-        return _templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
             "tokens/list.html",
             {
@@ -88,7 +85,7 @@ async def create_token(
     # Refresh token list (includes the new one minus the raw value)
     tokens = auth.list_api_tokens(user.user_id)
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "tokens/list.html",
         {
@@ -128,7 +125,7 @@ async def revoke_token(
     auth.revoke_api_token(target["prefix"])
 
     tokens = auth.list_api_tokens(user.user_id)
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "tokens/list.html",
         {
