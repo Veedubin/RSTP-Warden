@@ -26,6 +26,9 @@ htmlcov/
 # Runtime data
 recordings/
 clips/
+# ...but not the web UI's template directories of the same name
+!/src/rtsp_warden/web/templates/recordings/
+!/src/rtsp_warden/web/templates/clips/
 *.ts
 *.m3u8
 *.mp4
@@ -51,6 +54,7 @@ test-results/
 Archive.zip
 *.bak
 *.tmp
+.worktrees
 
 # Internal sprint planning documents
 SPRINT*_PLAN.md
