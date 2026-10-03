@@ -327,6 +327,39 @@ if TYPE_CHECKING:
     from ..config import CameraConfig
 
 
+@dataclass(slots=True)
+class DetectorSlot:
+    """A built detector plus what the runner needs to schedule and route its output.
+
+    ``index`` is the spec's position in ``CameraConfig.detectors`` (ruling R15), so UI
+    rows and runtime status line up even when a disabled or failing spec is skipped.
+    """
+
+    index: int
+    spec: DetectorSpec
+    detector: Detector
+    fps: float  # effective rate: spec.fps, else the camera's detect_fps
+    tracked: bool  # onnx output goes to the Tracker, not to result_sinks
+    motion_events: bool  # motion spec whose events resolve true (ruling R11)
+    input_width: int | None  # model input width (onnx), None otherwise
+
+
+def _make_slot(
+    camera_cfg: CameraConfig, index: int, spec: DetectorSpec, det: Detector
+) -> DetectorSlot:
+    """Describe one successfully built detector (called in lock-step with the append)."""
+    width = getattr(det, "input_width", None)
+    return DetectorSlot(
+        index=index,
+        spec=spec,
+        detector=det,
+        fps=float(camera_cfg.effective_fps(spec)),
+        tracked=spec.type == "onnx",
+        motion_events=spec.type == "motion" and camera_cfg.motion_events_enabled(spec),
+        input_width=int(width) if isinstance(width, int) else None,
+    )
+
+
 @dataclass
 class CameraDetectorBundle:
     """Aggregated result of building detectors for a camera.
@@ -343,6 +376,8 @@ class CameraDetectorBundle:
     roi: ROI | None = None
     grid_masks: list[GridMask] = field(default_factory=list)
     area_masks: list[tuple[str, GridMask]] = field(default_factory=list)
+    # Parallel to ``detectors`` (same length and order); empty for an empty bundle.
+    slots: list[DetectorSlot] = field(default_factory=list)
 
 
 def build_detector_with_sensitivity(
@@ -561,7 +596,10 @@ def build_detectors_for_camera(
 
     # Build individual detectors with sensitivity and class filter applied.
     detectors: list[Detector] = []
-    for spec in enabled_specs:
+    slots: list[DetectorSlot] = []
+    for spec_index, spec in enumerate(base_specs):
+        if not spec.enabled:
+            continue
         try:
             det = build_detector_with_sensitivity(
                 spec=spec,
@@ -570,7 +608,9 @@ def build_detectors_for_camera(
                 camera_detect_classes=camera_cfg.detect_classes,
                 models_dir=models_dir,
             )
+            slot = _make_slot(camera_cfg, spec_index, spec, det)
             detectors.append(det)
+            slots.append(slot)
         except Exception:
             logger.warning(
                 "failed to build detector type=%s for camera=%s",
@@ -599,6 +639,7 @@ def build_detectors_for_camera(
 
     return CameraDetectorBundle(
         detectors=detectors,
+        slots=slots,
         masks=runner_masks,
         roi=runner_roi,
         grid_masks=grid_masks,
@@ -618,4 +659,5 @@ __all__ = [
     "build_masks",
     "build_roi",
     "CameraDetectorBundle",
+    "DetectorSlot",
 ]

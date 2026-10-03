@@ -83,7 +83,7 @@ def test_event_sink_logs_and_continues_when_the_insert_fails(
         raise RuntimeError("database is locked")
 
     warnings: list[str] = []
-    monkeypatch.setattr(sinks_mod.schema, "insert_event", broken_insert)
+    monkeypatch.setattr(sinks_mod._schema, "insert_event", broken_insert)
     monkeypatch.setattr(
         sinks_mod.logger, "warning", lambda msg, *args, **kw: warnings.append(msg % args)
     )
