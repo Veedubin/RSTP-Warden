@@ -2,6 +2,46 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
+## 2026-10-02 (night) — START HERE: RW-2 and RW-3 built and merged; master is the integrated tree, not pushed
+
+**Where things are.** `master` = RW-1 + RW-0 + RW-2 (`feat/ui-pass`, 11 tasks) + RW-3 (`feat/detection`, 18 tasks) +
+the merge (`80c2323`) + the integration commit (`chore: integrate RW-2 and RW-3 after the merge`). Gate on master:
+`uv run pytest -q` → 2150 passed, 1 skipped (the `gpu` marker); `uv run ruff check src/ tests/` → exactly 4 baseline
+E501 (`cli.py` x2, `proxy/mjpeg.py`, `recorder.py`); `uv run ruff format --check` clean. Python floor is now `>=3.11`
+(onnxruntime 1.30.0 core, `gpu` extra onnxruntime-gpu[cuda,cudnn], onnx dev). Verified by booting `serve` against a
+scratch config: the 0002 database auto-upgraded to 0003 with a `.bak-0002_clips` copy first, login works, all pages
+return 200 (dashboard, cameras, add/edit, zones, detection panel, sensitivity, classes, events, actions, health,
+settings, users, api-tokens, onvif), `/alerts` and `/recordings` are gone (404), `/status.json` no longer leaks
+credentials. Nothing pushed. Branches `feat/ui-pass` and `feat/detection` are fully merged (worktrees removed).
+
+**What was built.** RW-2: shared templates instance, flash messages, nav/page header/CSS primitives, htmx form fixes,
+one camera-card partial with polled status and redacted errors (+ `/status.json` redaction), ffprobe connection test,
+ONVIF WS-UsernameToken GetStreamUri discovery over ports 80/8080/888/2020, camera config services (env-ref
+credentials in `<config dir>/.env`, raw-YAML append/patch/remove, port allocation), add/edit/delete camera routes with
+hot add/restart/remove through the RW-0 lifecycle API, working ONVIF page (form routes, locked preset writes,
+per-camera `onvif_port`), writable Docker/systemd config, mobile-width pass. RW-3: `detect_fps`, detector
+`fps/model/device/events`, rules, deprecations; frame tap fixed (per-camera dispatcher, real pipe fd, proxy stream
+only, ordered runner); model registry with YOLOX descriptors + label validation; OnnxDetector (CUDA/CPU); IoU tracker;
+migration 0003 + packaged migrations + auto-upgrade; area zones; EventBuilder/MotionBurst/per-detector fps; sync
+ntfy/webhook/apprise actions + rule engine + legacy alerts mapping; ActionQueue + delayed ClipScheduler + mp4 clips
+with .ts fallback; runtime wiring + integration test; event cards; actions page; camera detection panel; live boxes;
+status surfaces; Dockerfile.cuda + GPU compose overlay + docs. Rulings R1-R22 in
+`docs/superpowers/plans/2026-10-02-rw2-rw3-decisions.md` were applied as written; the owner has not reviewed them
+individually.
+
+**Known open / deferred.**
+- No whole-branch code review was run (owner stopped review agents for cost). Reviewer findings that landed before the
+  stop were folded in by the implementers; see the commit bodies on the two branches.
+- Manual Foscam tests (plan tasks RW-2/12, RW-3/19) not run: need the owner's OK and the camera.
+- Dockerfile.cuda / GPU path not built or run on this host (no NVIDIA container toolkit). CPU path verified offline only.
+- YOLOX model SHA-256 values come from mirrors; the first real download verifies them (fails loudly on mismatch).
+- `docker/README.md` and `packaging/systemd/README.md` got the minimum edits; README's configuration reference is RW-3's.
+- Owner still needs to rotate the Foscam password present in `origin` git history, and decide on pushing `master`.
+
+**Next, in order.** 1. Owner: review `git log master`, decide on push. 2. Optional: one whole-branch review
+(`/code-review`) before pushing. 3. Manual camera verification per the two plan tasks. 4. Build the CUDA image on a
+GPU host.
+
 ## 2026-10-02 (evening) — START HERE: RW-0 landed on master; RW-2 and RW-3 being built in parallel worktrees
 
 **Where things are.** `master` at `b2ca2a5`: RW-1 + RW-0 (`dcaf660` hygiene, `19c075b` per-camera lifecycle API on

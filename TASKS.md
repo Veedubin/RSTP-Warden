@@ -15,16 +15,14 @@ One card per unit of work. Status phrases are updated in place; history stays in
 ## RW-2 — UI pass + add-camera flow (sub-project 2 of 3)
 - Spec: same document, Appendix A.2 (bounded)
 - Plan: `docs/superpowers/plans/2026-10-02-ui-pass.md` (rulings in `2026-10-02-rw2-rw3-decisions.md`)
-- Status: **in progress** on branch `feat/ui-pass` in `.worktrees/rw-2` (one implementer agent, tasks 1-11; task 12
-  manual, gated on owner). Merge first.
+- Status: **done**, merged to `master` 2026-10-02 night (branch `feat/ui-pass`, 11 task commits; manual task 12 not run, needs the owner).
 
 ## RW-3 — Detection and automation (sub-project 3 of 3)
 - Spec: same document, sections 4-12 and Appendix B
 - Plan: `docs/superpowers/plans/2026-10-02-detection.md` (rulings in `2026-10-02-rw2-rw3-decisions.md`)
-- Status: **in progress** on branch `feat/detection` in `.worktrees/rw-3` (one implementer agent, tasks 1-18; task 19
-  manual, gated on owner). Merge after RW-2. Owner decisions kept: ONNX Runtime + YOLOX (no Ultralytics/AGPL), GPU
-  first with CPU fallback, per-camera `detect_fps` plus per-detector `fps`, actions = ntfy/Apprise/webhook, no Pi/GPIO.
+- Status: **done**, merged to `master` 2026-10-02 night on top of RW-2 (branch `feat/detection`, 18 task commits + merge + integration commit; manual task 19 not run, needs the owner). Owner decisions kept: ONNX Runtime + YOLOX, GPU first with CPU fallback, per-camera `detect_fps` plus per-detector `fps`, actions = ntfy/Apprise/webhook, no Pi/GPIO.
 
 ## Owner actions (not for agents)
+- Decide whether to run a whole-branch code review before pushing; run the manual camera tests (RW-2/12, RW-3/19).
 - Rotate the Foscam camera password that is in `origin` git history (pre-scrub `examples/configs/`).
 - Decide on pushing `master` to `origin`.
