@@ -413,18 +413,17 @@ class TestSettings:
 
 
 class TestCameraSettings:
-    """Tests for /cameras/{name}/settings route (admin-only, read-only)."""
+    """/cameras/{name}/settings is now an admin-only 303 redirect to the edit form."""
 
-    def test_camera_settings_renders_for_admin(self, admin_client: TestClient) -> None:
-        """Admin should see camera settings page."""
-        r = admin_client.get("/cameras/front/settings")
-        assert r.status_code == 200
-        assert "config.yaml" in r.text  # banner
-        assert "front" in r.text
+    def test_camera_settings_redirects_to_edit(self, admin_client: TestClient) -> None:
+        """Admin is sent to the camera edit form."""
+        r = admin_client.get("/cameras/front/settings", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/cameras/front/edit"
 
-    def test_camera_settings_shows_config(self, admin_client: TestClient) -> None:
-        """Camera settings should show recording and proxy config."""
-        r = admin_client.get("/cameras/front/settings")
+    def test_camera_detail_shows_config(self, admin_client: TestClient) -> None:
+        """The detail page carries the recording and proxy summary the settings page had."""
+        r = admin_client.get("/cameras/front")
         assert r.status_code == 200
         assert "Recording" in r.text
         assert "Proxy" in r.text
@@ -432,12 +431,12 @@ class TestCameraSettings:
 
     def test_camera_settings_404_for_unknown(self, admin_client: TestClient) -> None:
         """GET /cameras/zzz/settings should return 404."""
-        r = admin_client.get("/cameras/zzz/settings")
+        r = admin_client.get("/cameras/zzz/settings", follow_redirects=False)
         assert r.status_code == 404
 
     def test_camera_settings_requires_admin(self, viewer_client: TestClient) -> None:
         """Viewer should get 403 on camera settings."""
-        r = viewer_client.get("/cameras/front/settings")
+        r = viewer_client.get("/cameras/front/settings", follow_redirects=False)
         assert r.status_code == 403
 
 

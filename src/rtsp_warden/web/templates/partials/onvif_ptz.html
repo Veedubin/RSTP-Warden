@@ -1,0 +1,35 @@
+{# PTZ pad for one camera. Context: camera, xaddr, ptz_enabled, duration_ms, duration_choices, ptz_message, ptz_error. #}
+{% set csrf = request.state.csrf_token if request.state.csrf_token else '' %}
+{% set cam_url = camera.name|urlencode %}
+<article id="onvif-ptz">
+  <header><strong>PTZ: {{ camera.name }}</strong></header>
+  {% if xaddr %}<p class="small">ONVIF device service <code>{{ xaddr }}</code></p>{% endif %}
+  {% if ptz_message %}<p class="flash flash-success" role="status">{{ ptz_message }}</p>{% endif %}
+  {% if ptz_error %}<p class="flash flash-error" role="alert">{{ ptz_error }}</p>{% endif %}
+  {% if ptz_enabled %}
+  <form method="post" action="/onvif/cameras/{{ cam_url }}/ptz"
+        hx-post="/onvif/cameras/{{ cam_url }}/ptz" hx-target="#onvif-ptz" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="ptz-duration">Move for
+      <select id="ptz-duration" name="duration_ms">
+        {% for d in duration_choices %}
+        <option value="{{ d }}"{% if d == duration_ms %} selected{% endif %}>{{ "until Stop" if d == 0 else ("%g s"|format(d / 1000)) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="ptz-pad">
+      <span></span>
+      <button type="submit" name="direction" value="up">Up</button>
+      <span></span>
+      <button type="submit" name="direction" value="left">Left</button>
+      <button type="submit" name="direction" value="stop" class="secondary">Stop</button>
+      <button type="submit" name="direction" value="right">Right</button>
+      <button type="submit" name="direction" value="zoom_out" class="outline">Zoom out</button>
+      <button type="submit" name="direction" value="down">Down</button>
+      <button type="submit" name="direction" value="zoom_in" class="outline">Zoom in</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="small">PTZ is off. Set <code>onvif.ptz_enabled: true</code> in config.yaml to use it.</p>
+  {% endif %}
+</article>

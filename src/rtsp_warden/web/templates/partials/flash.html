@@ -1,0 +1,5 @@
+{# One-shot message: routes call _common.set_flash(); ContextMiddleware puts it on request.state.flash. #}
+{% set flash = request.state.flash %}
+{% if flash %}
+<div id="flash" class="flash flash-{{ flash.level }}" role="{{ 'alert' if flash.level == 'error' else 'status' }}">{{ flash.message }}</div>
+{% endif %}

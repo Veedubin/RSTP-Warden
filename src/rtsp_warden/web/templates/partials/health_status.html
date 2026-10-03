@@ -1,3 +1,4 @@
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -9,14 +10,16 @@
   <tbody>
     <tr>
       <td>{% if status.ok %}<span class="status-dot status-ok"></span> OK{% else %}<span class="status-dot status-error"></span> Issues{% endif %}</td>
-      <td>{{ version }}</td>
+      <td>{{ app_version }}</td>
       <td>{{ status.cameras | length }}</td>
     </tr>
   </tbody>
 </table>
+</div>
 
 {% if status.cameras %}
 <h3>Camera status</h3>
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>Name</th><th>Status</th><th>Details</th></tr>
@@ -39,6 +42,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 
 {% if status.errors %}

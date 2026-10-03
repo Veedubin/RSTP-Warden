@@ -12,19 +12,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import Response
-from starlette.templating import Jinja2Templates
 
 from ... import auth
 from ...db.schema import get_user_by_username
 from ..auth_bridge import get_current_user_from_request
 from ..csrf import CSRF_COOKIE_NAME, check_csrf_form
-from ..paths import TEMPLATES_DIR
 from ..rate_limit import get_login_limiter
+from ._common import set_flash, templates
 
 router = APIRouter()
-
-# Module-level templates instance (avoids re-creation per request).
-_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 def _is_auth_enabled() -> bool:
@@ -64,7 +60,7 @@ async def login_page(request: Request) -> HTMLResponse:
     csrf_token = getattr(request.state, "csrf_token", "")
     next_url = _safe_next(request.query_params.get("next"))
 
-    return _templates.TemplateResponse(
+    return templates.TemplateResponse(
         request,
         "login.html",
         {
@@ -112,7 +108,7 @@ async def login_submit(
         # Failed login -- re-render form with error
         csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME, "")
 
-        return _templates.TemplateResponse(
+        return templates.TemplateResponse(
             request,
             "login.html",
             {
@@ -160,4 +156,5 @@ async def logout_submit(
 
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key=auth.SESSION_COOKIE_NAME, path="/")
+    set_flash(response, "You have been logged out.")
     return response

@@ -53,8 +53,8 @@
              @error="snapshotUrl = ''">
       </template>
       <template x-if="!snapshotUrl">
-        <div style="background:#222; color:#999; display:flex; align-items:center; justify-content:center;"
-             :style="'width:' + (frameWidth > 800 ? 800 : frameWidth) + 'px; height:' + (frameHeight > 450 ? 450 : frameHeight) + 'px;'">
+        <div class="zone-placeholder"
+             :style="{ aspectRatio: frameWidth + ' / ' + frameHeight }">
           <p>No snapshot available</p>
         </div>
       </template>

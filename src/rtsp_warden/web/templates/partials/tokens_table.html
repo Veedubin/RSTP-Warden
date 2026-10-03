@@ -1,0 +1,60 @@
+{#
+  API token panel: the one-time token, a notice or error line, and the token
+  table. Included by tokens/list.html and returned on its own by the create
+  and revoke routes (routes/tokens.py) for htmx requests; the forms swap it
+  over #tokens-panel.
+
+  Expects: tokens. Optional: new_token_raw, notice, error.
+#}
+<div id="tokens-panel">
+  {% if new_token_raw %}
+  {% include "partials/token_created.html" %}
+  {% endif %}
+  {% if notice %}
+  <p class="flash flash-success" role="status">{{ notice }}</p>
+  {% endif %}
+  {% if error %}
+  <p class="flash flash-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <h2>Your Tokens</h2>
+  {% if tokens %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Prefix</th>
+          <th>Created</th>
+          <th>Last Used</th>
+          <th>Expires</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tokens %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td><code>{{ t.prefix }}...</code></td>
+          <td>{{ t.created_at[:16] if t.created_at else '-' }}</td>
+          <td>{{ t.last_used_at[:16] if t.last_used_at else 'Never' }}</td>
+          <td>{{ t.expires_at[:16] if t.expires_at else 'Never' }}</td>
+          <td>
+            <form method="POST" action="/api-tokens/{{ t.id }}/revoke"
+                  hx-post="/api-tokens/{{ t.id }}/revoke"
+                  hx-target="#tokens-panel"
+                  hx-swap="outerHTML"
+                  hx-confirm="Revoke token '{{ t.name }}'?">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+              <button type="submit" class="outline small contrast">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>You have no API tokens yet.</p>
+  {% endif %}
+</div>

@@ -213,10 +213,11 @@ class TestCameras:
         assert "front" in r.text
 
     def test_camera_detail_has_mjpeg_url(self, client_with_config: TestClient) -> None:
-        """Camera detail for MJPEG proxy camera should show MJPEG URL."""
+        """Camera detail embeds the same-origin MJPEG stream and shows the proxy port."""
         r = client_with_config.get("/cameras/front")
         assert r.status_code == 200
-        assert "9001" in r.text  # proxy port
+        assert 'src="/cameras/front/live.mjpeg"' in r.text
+        assert "mjpeg, port 9001" in r.text
 
     def test_camera_detail_no_proxy(self, client_with_config: TestClient) -> None:
         """Camera detail for non-proxy camera should show no-preview message."""
@@ -230,10 +231,11 @@ class TestCameras:
         assert r.status_code == 404
 
     def test_camera_status_partial(self, client_with_config: TestClient) -> None:
-        """GET /cameras/front/status should return camera card HTML."""
+        """GET /cameras/front/status returns the shared camera card partial."""
         r = client_with_config.get("/cameras/front/status")
         assert r.status_code == 200
-        assert "front" in r.text
+        assert 'id="camera-card-front"' in r.text
+        assert '<span class="status-badge status-unknown">Unknown</span>' in r.text
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,25 @@
+{# WS-Discovery results. Context: found (list of DiscoveredCamera), discover_error. #}
+{% if discover_error %}
+<p class="flash flash-error" role="alert">{{ discover_error }}</p>
+{% elif not found %}
+<p class="small">No ONVIF cameras answered.</p>
+{% else %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Address</th><th>Name</th><th>Make and model</th><th>Device service</th></tr>
+    </thead>
+    <tbody>
+      {% for cam in found %}
+      <tr>
+        <td>{{ cam.address }}</td>
+        <td>{{ cam.name or "-" }}</td>
+        <td>{{ cam.manufacturer or "-" }} {{ cam.model or "" }}</td>
+        <td><code>{{ cam.xaddr }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small">To add one, use <a href="/cameras/new">Add camera</a>. The port in the device service URL is the camera's ONVIF port.</p>
+{% endif %}
