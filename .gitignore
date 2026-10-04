@@ -61,3 +61,9 @@ SPRINT*_PLAN.md
 # compose bind mounts at the repo root (the owner's config.yaml, .env copy, SQLite DB, models)
 config/
 data/
+
+# RW-5 wildlife training tool: datasets, checkpoints and the pinned YOLOX checkout
+tools/wildlife/data/
+tools/wildlife/YOLOX_outputs/
+tools/wildlife/.yolox/
+tools/wildlife/out/
