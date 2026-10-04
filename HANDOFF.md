@@ -2,45 +2,68 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
-## 2026-10-04 (early morning) — START HERE: RW-5 runtime shipped and gated; the wildlife model is training
+## 2026-10-04 (morning) — START HERE: RW-5 done; wildlife-yolox-s trained, exported and running in the live stack
 
-**Where things are.** `master` is local-only ahead of `origin/master` (`715e8ec`) by the RW-5 commits (`d6ed1c2`
-docs .. `4e402be` version 1.4.0); nothing pushed yet (push only on the owner's word). Single checkout, working tree
-clean apart from the gitignored `config/`, `data/`, `tools/wildlife/data/`, `tools/wildlife/.yolox/`,
-`tools/wildlife/YOLOX_outputs/`. Gate on `4e402be`: **2292 passed / 1 skipped**, ruff exactly the 4 baseline E501,
-format clean. The compose stack still runs the pre-RW-5 image against the Foscam.
+**Where things are.** `master` is local-only ahead of `origin/master` (`715e8ec`) by the RW-5 commits (`d6ed1c2` ..
+this docs commit); **nothing pushed yet** (push only on the owner's word). Single checkout, working tree clean apart
+from the gitignored `config/`, `data/`, `tools/wildlife/{data,.yolox,YOLOX_outputs,out}/`. Gate on `bc2c87f`
+(the last code commit, version 1.4.0): **2295 passed / 1 skipped**, ruff exactly the 4 baseline E501, format
+clean. The compose stack (GPU overlay, http://127.0.0.1:3333/) runs that code with both detectors.
 
-**What RW-5 shipped (runtime, all tested offline).** Spec `docs/superpowers/specs/2026-10-04-wildlife-detection-design.md`,
-plan `docs/superpowers/plans/2026-10-04-rw5-wildlife-detection.md` (its "Deviations" section is the truth where it
-differs from the task text).
-- `detectors/daylight.py`: `channel_spread` + `DayNight` (first frame sets the state, 3-frame hysteresis, threshold
-  4.0). The runner measures every decoded frame before the privacy masks, sets `event_builder.night`, writes
-  `"night"` into every event's metadata, reports `night` / `night_since` / `night_switches`; Detection panel says
-  "night mode on / off"; events show a `night` badge (old rows: none).
-- `DetectorSpec.when` (`always | day | night`, counted as `when_skipped`) and `DetectorSpec.classes` (onnx only,
-  validated against that model's labels, intersected with `detect_classes`; two slots sharing a label log a warning).
-  Detection panel: a `when` select on every row and a `classes` field on onnx rows
-  (`POST /cameras/{name}/detectors/{index}/when|classes`, patch-one-key write-back, 409 / 422 as the fps route).
-- `tools/wildlife/` (own uv project, never in the wheel): `setup.sh` (uv sync + pinned YOLOX checkout in `.yolox/`,
-  because YOLOX's `setup.py` imports torch at build time), `fetch.py`, `prepare.py`, `exp.py`, `train.sh`,
-  `evaluate.py`, `export.py`, `verify.py`; pure helpers pinned by `tests/test_wildlife_tool.py`.
+**What RW-5 shipped.** Spec `docs/superpowers/specs/2026-10-04-wildlife-detection-design.md`, plan
+`docs/superpowers/plans/2026-10-04-rw5-wildlife-detection.md` (its "Deviations" section is the truth where it differs
+from the task text). README "Wildlife model" and "Day and night" under Detection; CLAUDE.md has the RW-5 notes.
+- Runtime: `detectors/daylight.py` (`channel_spread`, `DayNight`: first frame sets the state, 3-frame hysteresis,
+  threshold 4.0; measured before the privacy masks); `"night"` in every event's metadata, `night` badge on events,
+  "night mode on / off" on the Detection panel, `night` / `night_since` / `night_switches` in `/status.json`.
+  `DetectorSpec.when` (`always | day | night`, `when_skipped` counter) and `DetectorSpec.classes` (onnx only,
+  validated per model, intersected with `detect_classes`; shared labels between slots log a warning). Detection
+  panel: `when` select on every row, `classes` field on onnx rows (`POST .../detectors/{index}/when|classes`).
+- `tools/wildlife/` (own uv project; YOLOX is a pinned source checkout in `.yolox/` made by `setup.sh`, because its
+  `setup.py` imports torch at build time): `fetch.py`, `prepare.py`, `exp.py`, `train.sh`, `evaluate.py`,
+  `export.py`, `verify.py`; pure helpers pinned by `tests/test_wildlife_tool.py`.
 
-**Training, in flight.** Dataset built: 16473 train / 1830 val images (ENA24 7898+891, Open Images 8393+921, Dat Tran
-182+18); train boxes cat 2053, fox 1321, raccoon 865, person 5123, vehicle 4010; 499 of the 1830 val images are
-grayscale. The public ENA24 zip has **no human images**, hence Open Images `Person` and `Car` as hard negatives.
-`BATCH=32 ./train.sh` started 01:55 on the RTX 4080 SUPER (about 10 GB, 0.29 s/iter, 515 iters/epoch, 50 epochs,
-so roughly 2.5 h); log in the session scratchpad (`train.log`), checkpoints in `tools/wildlife/YOLOX_outputs/wildlife_yolox_s/`.
-If a fresh session finds `best_ckpt.pth` there: `cd tools/wildlife && uv run --no-sync python evaluate.py` (soft
-target: cat / fox / raccoon AP50 >= 0.6 on the `gray` column), `uv run --no-sync python export.py`, then from the
-repo root `uv run python tools/wildlife/verify.py tools/wildlife/out/wildlife-yolox-s <a val raccoon image>`,
-`cp -r tools/wildlife/out/wildlife-yolox-s data/models/`, add the second detector to `config/config.yaml` (block in
-README "Wildlife model"), rebuild + restart the compose stack (`docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`).
+**The model.** Data: 16473 train / 1830 val images (ENA24 7898+891, Open Images 8393+921, Dat Tran 182+18); 499 val
+images are grayscale. The public ENA24 zip has **no human images**, so Open Images `Person` and `Car` are in as hard
+negatives. YOLOX-S fine-tuned 50 epochs, batch 32, fp16, 2 h 04 min on the RTX 4080 SUPER (about 10 GB, 0.29 s/iter);
+best COCO mAP 67.35, overall AP50 0.882. `evaluate.py` AP50 per class (all / colour / grayscale validation images):
 
-**Next, in order.** 1. Finish training → evaluate → export → verify → install into the live stack (above).
-2. HANDOFF/TASKS with the eval table; then the owner's "push". 3. Owner: watch for `fox` / `raccoon` / `cat` events
-with the right label by day and by night; optionally drop the Roboflow "Cat/Raccoons" COCO export into
-`tools/wildlife/data/raw/roboflow-cat-raccoons/` and retrain for more raccoons. 4. Later: publish the model as a
-release asset + built-in descriptor; an event "this was actually a fox" relabel button (RW-6 candidate).
+| label | all | colour | gray |
+|---|---|---|---|
+| cat | 0.907 | 0.894 | 0.958 |
+| fox | 0.925 | 0.883 | 0.970 |
+| raccoon | 0.873 | 0.849 | 0.920 |
+| dog | 0.847 | 0.831 | 0.931 |
+| skunk | 0.899 | 0.751 | 0.979 |
+| opossum | 1.000 | - | 1.000 |
+| squirrel | 0.945 | 0.945 | 1.000 |
+| rabbit | 0.896 | 0.881 | 0.960 |
+| person (negative only) | 0.487 | 0.487 | 0.834 |
+
+Soft target was 0.6 on `gray` for cat / fox / raccoon: all three clear it. Exported with the raw head to
+`tools/wildlife/out/wildlife-yolox-s/` (`wildlife_yolox_s.onnx` 35.8 MB, sha256 `efbd81a7...ac5fab`, `model.yaml`,
+`wildlife.txt`) and verified through `rtsp_warden`'s own `OnnxDetector` on six ENA24 frames (raccoon 0.87 and fox
+0.78 on grayscale; raccoon 0.61, fox 0.94, cat 0.89 on colour; one small grayscale cat came back as `bobcat 0.30`,
+below the live threshold). Installed as a user model in `data/models/wildlife-yolox-s/`; `config/config.yaml` now has
+`detect_classes` with the animals, `yolox-s` with `classes: [person, car, truck, bicycle, motorcycle]` and a second
+`onnx` slot `wildlife-yolox-s` with `classes: [cat, dog, fox, raccoon, skunk, opossum, squirrel, rabbit]`,
+`min_confidence: 0.5`; the config validates against the installed descriptors.
+
+**First live run and the one fix it forced.** Rebuilt and restarted the compose stack (GPU overlay): both onnx
+detectors load with `CUDAExecutionProvider`, no warnings, frames flowing to both. But at 04:03 local the flag said
+`night: false`: a live frame measured brightness 16 / 255 with channel means B 19 / G 11 / R 17, i.e. the camera's IR
+LEDs are off (or the IR-cut filter never flipped) and the sensor sends near-black frames whose noise is tinted, spread
+8.6. `bc2c87f` adds a brightness floor (`NIGHT_BRIGHTNESS = 40.0`: night = spread < 4 **or** brightness < 40) and puts
+`night_spread` / `night_brightness` into the runner status, `/status.json` and the Detection panel line, so the
+thresholds can be judged on the real camera. Nobody has yet seen a true IR (grayscale) frame from this Foscam; the
+Camera settings page has the infrared controls if the owner wants the LEDs on.
+
+**Not done / owner's.** Push. Watch the first real `fox` / `raccoon` / `cat` events by day and by night (the model has
+never seen this camera). For more raccoons, drop the Roboflow "Cat/Raccoons" COCO export into
+`tools/wildlife/data/raw/roboflow-cat-raccoons/` and rerun `prepare.py` + `train.sh` (`prepare.py` picks it up).
+Later: publish the model as a GitHub release asset with a built-in descriptor (the README's descriptor text is
+ready); an event "this was actually a fox" relabel button and a retrain loop (RW-6 candidate). Everything from the
+2026-10-03 block that was the owner's (password rotation, checklists RW-2/12 and RW-3/19) still is.
 
 ## 2026-10-03 (late afternoon) — START HERE: RW-4 verified by the owner on the live camera; nothing in flight
 
