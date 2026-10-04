@@ -1,0 +1,30 @@
+[project]
+name = "rtsp-warden-wildlife"
+version = "0.1.0"
+description = "Trains the wildlife-yolox-s model for rtsp-warden (a tool, never part of the package)."
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "torch>=2.6",
+  "torchvision>=0.21",
+  "yolox @ git+https://github.com/Megvii-BaseDetection/YOLOX.git@6ddff4824372906469a7fae2dc3206c7aa4bbaee",
+  "pycocotools>=2.0.8",
+  "onnx>=1.17",
+  "onnxruntime>=1.20",
+  "opencv-python-headless>=4.10",
+  "numpy>=1.26",
+  "httpx>=0.28",
+  "pyyaml>=6",
+  "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

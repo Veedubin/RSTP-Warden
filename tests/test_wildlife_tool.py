@@ -1,0 +1,156 @@
+"""tools/wildlife/wildlife_data.py: pure data-prep functions, imported by file path (no torch).
+
+The training tool is a separate uv project and never part of the package; these tests pin
+the parts that must agree with the runtime (labels order, the grayscale measure, the
+descriptor the registry loads) and the pure conversions, all offline.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from types import ModuleType
+
+import numpy as np
+import pytest
+
+from rtsp_warden.detectors.daylight import channel_spread as runtime_spread
+
+TOOL = Path(__file__).resolve().parents[1] / "tools" / "wildlife"
+
+
+def _load(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, TOOL / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+wd = _load("wildlife_data")
+
+
+def test_labels_match_the_shipped_file_and_the_spec_order() -> None:
+    lines = (TOOL / "wildlife.txt").read_text(encoding="utf-8").split()
+    assert lines == list(wd.LABELS)
+    assert wd.LABELS[0] == "cat" and wd.LABELS[-1] == "vehicle" and len(wd.LABELS) == 18
+    assert wd.label_id("raccoon") == 3
+    assert [c["id"] for c in wd.COCO_CATEGORIES] == list(range(1, 19))
+    assert wd.COCO_CATEGORIES[2]["name"] == "fox"
+
+
+@pytest.mark.parametrize(
+    ("ena", "label"),
+    [
+        ("Red Fox", "fox"),
+        ("Grey Fox", "fox"),
+        ("Northern Raccoon", "raccoon"),
+        ("Domestic Cat", "cat"),
+        ("White_Tailed_Deer", "deer"),
+        ("Wild Turkey", "bird"),
+        ("American Crow", "bird"),
+        ("Chicken", "bird"),
+        ("Eastern Fox Squirrel", "squirrel"),
+        ("Eastern Gray Squirrel", "squirrel"),
+        ("Human", "person"),
+        ("Vehicle", "vehicle"),
+    ],
+)
+def test_ena24_mapping(ena: str, label: str) -> None:
+    assert wd.map_ena24_category(ena) == label
+
+
+def test_ena24_mapping_covers_every_category_of_the_dataset() -> None:
+    names = [
+        "American Crow", "Human", "American Black Bear", "Dog", "Chicken", "Virginia Opossum",
+        "Horse", "Domestic Cat", "Grey Fox", "Wild Turkey", "Red Fox", "White_Tailed_Deer",
+        "Coyote", "Eastern Fox Squirrel", "Eastern Cottontail", "Bobcat", "Eastern Gray Squirrel",
+        "Eastern Chipmunk", "Striped Skunk", "Vehicle", "Northern Raccoon", "Bird", "Woodchuck",
+    ]  # fmt: skip
+    assert len(names) == 23
+    for name in names:
+        assert wd.map_ena24_category(name) in wd.LABELS
+
+
+def test_ena24_unknown_category_is_an_error_naming_it() -> None:
+    with pytest.raises(wd.UnknownCategory, match="Sasquatch"):
+        wd.map_ena24_category("Sasquatch")
+
+
+def test_open_images_filter_caps_images_and_skips_groups_and_drawings() -> None:
+    def row(img: str, mid: str, **extra: str) -> dict[str, str]:
+        base = {
+            "ImageID": img,
+            "LabelName": mid,
+            "XMin": "0.1",
+            "XMax": "0.5",
+            "YMin": "0.2",
+            "YMax": "0.6",
+            "IsGroupOf": "0",
+            "IsDepiction": "0",
+        }
+        return {**base, **extra}
+
+    cat, fox, bus = "/m/01yrx", "/m/0306r", "/m/01bjv"
+    rows = [
+        row("a", cat),
+        row("a", cat),
+        row("b", cat),
+        row("c", cat),
+        row("d", fox),
+        row("e", fox, IsGroupOf="1"),
+        row("f", fox, IsDepiction="1"),
+        row("g", bus),
+    ]
+    out = wd.filter_open_images_rows(rows, cap_per_class=2)
+    assert sorted(out) == ["a", "b", "d"]
+    assert len(out["a"]) == 2 and out["a"][0]["label"] == "cat"
+    assert out["d"][0] == {"label": "fox", "xmin": 0.1, "xmax": 0.5, "ymin": 0.2, "ymax": 0.6}
+
+
+def test_open_images_filter_keeps_every_wanted_box_of_a_kept_image() -> None:
+    cat, fox = "/m/01yrx", "/m/0306r"
+
+    def row(img: str, mid: str) -> dict[str, str]:
+        return {"ImageID": img, "LabelName": mid, "XMin": "0", "XMax": "1", "YMin": "0",
+                "YMax": "1", "IsGroupOf": "0", "IsDepiction": "0"}  # fmt: skip
+
+    # image "x" is kept for cat; its fox box arriving later is kept even though fox is capped
+    rows = [row("x", cat), row("y", fox), row("x", fox)]
+    out = wd.filter_open_images_rows(rows, cap_per_class=1)
+    assert sorted(out) == ["x", "y"]
+    assert [b["label"] for b in out["x"]] == ["cat", "fox"]
+
+
+def test_box_conversions() -> None:
+    assert wd.voc_box_to_coco(10, 20, 50, 80) == [10.0, 20.0, 40.0, 60.0]
+    assert wd.normalized_box_to_coco(0.1, 0.5, 0.2, 0.6, 200, 100) == pytest.approx(
+        [20.0, 20.0, 80.0, 40.0]
+    )
+
+
+def test_split_is_seeded_and_disjoint() -> None:
+    ids = [f"img{i}" for i in range(100)]
+    train, val = wd.split_image_ids(ids, 0.1, seed=7)
+    assert len(val) == 10 and len(train) == 90 and not set(train) & set(val)
+    assert wd.split_image_ids(ids, 0.1, seed=7) == (train, val)
+    assert wd.split_image_ids(ids, 0.1, seed=8) != (train, val)
+
+
+def test_channel_spread_matches_the_runtime_formula() -> None:
+    rng = np.random.default_rng(1)
+    frame = rng.integers(0, 256, size=(45, 80, 3), dtype=np.uint8)
+    for _ in range(5):
+        frame = rng.integers(0, 256, size=(45, 80, 3), dtype=np.uint8)
+        assert wd.channel_spread(frame) == pytest.approx(runtime_spread(frame))
+    assert wd.is_gray(np.full((45, 80, 3), 90, dtype=np.uint8)) is True
+    assert wd.is_gray(frame) is False
+
+
+def test_grayscale_copy_is_grey_and_darker_or_equal() -> None:
+    rng = np.random.default_rng(3)
+    img = rng.integers(0, 256, size=(45, 80, 3), dtype=np.uint8)
+    out = wd.grayscale_copy(img, rng)
+    assert out.shape == img.shape and out.dtype == np.uint8
+    assert wd.channel_spread(out) < 12.0  # grey plus a little noise
+    assert out.mean() <= img.mean() + 6.0

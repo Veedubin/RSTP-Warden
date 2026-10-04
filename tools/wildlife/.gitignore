@@ -1,0 +1,6 @@
+data/
+YOLOX_outputs/
+out/
+.yolox/
+*.pth
+*.onnx
