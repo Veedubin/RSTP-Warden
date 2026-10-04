@@ -48,8 +48,39 @@ log = logging.getLogger(__name__)
 CLASS_CATEGORIES: dict[str, tuple[str, ...]] = {
     "person": ("person",),
     "pet": ("cat", "dog"),
-    "vehicle": ("bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"),
-    "critter": ("bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"),
+    "vehicle": (
+        "bicycle",
+        "car",
+        "motorcycle",
+        "airplane",
+        "bus",
+        "train",
+        "truck",
+        "boat",
+        "vehicle",
+    ),
+    # COCO's animals plus the wildlife model's labels (RW-5).
+    "critter": (
+        "bird",
+        "horse",
+        "sheep",
+        "cow",
+        "elephant",
+        "bear",
+        "zebra",
+        "giraffe",
+        "fox",
+        "raccoon",
+        "skunk",
+        "opossum",
+        "squirrel",
+        "rabbit",
+        "coyote",
+        "bobcat",
+        "deer",
+        "chipmunk",
+        "woodchuck",
+    ),
 }
 _CATEGORY_OF: dict[str, str] = {
     label: category for category, labels in CLASS_CATEGORIES.items() for label in labels
@@ -208,6 +239,8 @@ def detector_rows(cfg: AppConfig, runtime: Any, camera: str) -> list[dict[str, A
                 "skipped": _count(live, "skipped"),
                 "when": spec.when,
                 "when_skipped": _count(live, "when_skipped"),
+                "classes": list(spec.classes) if spec.classes is not None else None,
+                "classes_text": ", ".join(spec.classes) if spec.classes else "",
                 "errors": _count(live, "errors"),
             }
         )

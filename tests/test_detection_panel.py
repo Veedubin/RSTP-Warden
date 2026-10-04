@@ -187,6 +187,82 @@ def _raw_camera(path: Path, name: str = "yard") -> dict[str, Any]:
     return next(c for c in raw["cameras"] if c["name"] == name)
 
 
+# --- RW-5: when and classes controls -----------------------------------------------------
+
+
+def test_set_when_patches_only_that_key(env: SimpleNamespace) -> None:
+    before = _raw_camera(env.path)
+    r = _post(env, "/cameras/yard/detectors/2/when", {"when": "night"})
+    assert r.status_code == 200
+    assert env.cfg.cameras[0].detectors[2].when == "night"
+    after = _raw_camera(env.path)
+    assert after["detectors"][2] == {**before["detectors"][2], "when": "night"}
+    assert after["detectors"][1]["note"] == "an unknown key that must survive"
+    assert "${T15_USER}:${T15_PASS}" in env.path.read_text(encoding="utf-8")
+    env.runtime.rebuild_camera_detectors.assert_called_once_with("yard")
+    assert '<option value="night" selected' in r.text
+
+
+def test_set_when_rejects_unknown_values_and_mismatched_type(env: SimpleNamespace) -> None:
+    assert _post(env, "/cameras/yard/detectors/2/when", {"when": "dusk"}).status_code == 422
+    assert _post(env, "/cameras/yard/detectors/9/when", {"when": "day"}).status_code == 404
+    raw = yaml.safe_load(env.path.read_text(encoding="utf-8"))
+    del raw["cameras"][0]["detectors"][0]  # index 1 is now the first onnx entry
+    env.path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    assert _post(env, "/cameras/yard/detectors/1/when", {"when": "night"}).status_code == 409
+    assert env.cfg.cameras[0].detectors[1].when == "always"
+    env.runtime.rebuild_camera_detectors.assert_not_called()
+
+
+def test_set_classes_validates_against_the_models_labels(env: SimpleNamespace) -> None:
+    r = _post(env, "/cameras/yard/detectors/2/classes", {"classes": "person, car ,truck"})
+    assert r.status_code == 200
+    assert env.cfg.cameras[0].detectors[2].classes == ["person", "car", "truck"]
+    assert _raw_camera(env.path)["detectors"][2]["classes"] == ["person", "car", "truck"]
+    assert 'value="person, car, truck"' in r.text
+    r = _post(env, "/cameras/yard/detectors/2/classes", {"classes": "person, unicorn"})
+    assert r.status_code == 422 and "unicorn" in r.text
+    assert env.cfg.cameras[0].detectors[2].classes == ["person", "car", "truck"]
+    r = _post(env, "/cameras/yard/detectors/2/classes", {"classes": ""})
+    assert r.status_code == 200
+    assert env.cfg.cameras[0].detectors[2].classes is None
+    assert _raw_camera(env.path)["detectors"][2]["classes"] is None
+    assert env.runtime.rebuild_camera_detectors.call_count == 2
+
+
+def test_set_classes_is_only_for_onnx_rows(env: SimpleNamespace) -> None:
+    r = _post(env, "/cameras/yard/detectors/0/classes", {"classes": "person"})
+    assert r.status_code == 422
+    r = env.client.get("/cameras/yard/detectors")
+    assert r.status_code == 200
+    # enabled, fps and when on every row, classes on the two onnx rows only
+    assert r.text.count('hx-post="/cameras/yard/detectors/') == 4 + 4 + 4 + 2
+    for index in (2, 3):
+        assert f'hx-post="/cameras/yard/detectors/{index}/classes"' in r.text
+    for index in (0, 1):
+        assert f"detectors/{index}/classes" not in r.text
+
+
+def test_viewer_sees_when_and_classes_as_text(db_with_user: str, config_path: Path) -> None:
+    create_user("viewer", hash_password("viewerpass1"), is_admin=False)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["cameras"][0]["detectors"][2]["when"] = "night"
+    raw["cameras"][0]["detectors"][2]["classes"] = ["person", "car"]
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app = create_app(
+        WebSettings(),
+        cfg=load_config(config_path),
+        runtime_provider=lambda: SimpleNamespace(cameras=[], detection_status=_live_status),
+        config_path=config_path,
+    )
+    client = TestClient(app)
+    _login(client, "viewer", "viewerpass1")
+    r = client.get("/cameras/yard/detectors")
+    assert r.status_code == 200
+    assert "<select" not in r.text and "/classes" not in r.text
+    assert "when=night" in r.text and "classes: person, car" in r.text
+
+
 # --- the panel ---------------------------------------------------------------------------
 
 

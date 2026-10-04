@@ -396,6 +396,8 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /cameras/{name}/detection` | user | Detection panel (htmx partial): `detect_fps`, tracking, detectors with their live provider, rules, "Fire test event" |
 | `POST /cameras/{name}/detectors/{index}/enabled` | admin | Toggle one detector (by its position in `detectors:`) on/off; writes back only that entry |
 | `POST /cameras/{name}/detectors/{index}/fps` | admin | Set one detector's own `fps` (at most the camera's `detect_fps`; empty = the camera's rate); a hot reload, no ingest restart |
+| `POST /cameras/{name}/detectors/{index}/when` | admin | Set when one detector runs: `always`, `day` (colour frames) or `night` (IR / grayscale frames); a hot reload |
+| `POST /cameras/{name}/detectors/{index}/classes` | admin | Set the labels one `onnx` detector may report (comma-separated, validated against its model; empty = all); a hot reload |
 | `POST /cameras/{name}/detection` | admin | Save `detect_fps`, `track_grace_seconds`, `min_track_frames` and `stationary_iou` (a new `detect_fps` restarts the camera's ingest) |
 | `POST /cameras/{name}/rules/test` | admin | "Fire test event": a synthetic `person` event through the camera's real rules and actions |
 | `GET /cameras/{name}/live-boxes.mjpeg` | user | Live MJPEG with the tracker's current boxes drawn (the "show boxes" switch) |

@@ -33,6 +33,13 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from ...config import DETECT_FPS_MAX, DETECT_FPS_MIN, AppConfig, CameraConfig, RetentionConfig
+from ...detectors.model_registry import (
+    DEFAULT_MODEL,
+    ModelError,
+    load_descriptor,
+    load_labels,
+    unknown_labels_message,
+)
 from ...detectors.sensitivity import (
     apply_sensitivity_to_confidence,
     apply_sensitivity_to_motion,
@@ -445,6 +452,113 @@ async def set_detector_fps(
     spec._fps_from_interval = False  # an explicit value now, never clamped as converted
     await run_in_threadpool(_try_rebuild_detectors, request, name)
 
+    if is_htmx(request):
+        return _detector_list_response(request, cfg, cam, user, message)
+    return RedirectResponse(url=f"/cameras/{name}", status_code=303)
+
+
+_WHEN_VALUES = ("always", "day", "night")
+
+
+async def _patch_detector_key(
+    request: Request, name: str, index: int, patch: dict[str, Any]
+) -> str | None:
+    """Patch keys of ``detectors[index]`` in config.yaml (RW-5 helper for when / classes).
+
+    Returns an error message for the fragment when the file cannot be written, None
+    otherwise; raises 409 when the entry changed under us (gone, or another type).
+    """
+    cfg = get_cfg(request)
+    cam = _camera_or_404(cfg, name)
+    spec = cam.detectors[index]
+    config_path = get_config_path(request)
+    if config_path is None:
+        return None
+    try:
+        written = await run_in_threadpool(
+            _persist_detector_entry, config_path, name, index, patch, expected_type=spec.type
+        )
+    except OSError as exc:
+        log.warning("camera %s: detector #%d %s not saved: %s", name, index, list(patch), exc)
+        return write_failed_message(config_path, exc)
+    if not written:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"config.yaml no longer has a {spec.type} detector at index {index} "
+                f"for camera {name!r}; restart rtsp-warden to load the edited file"
+            ),
+        )
+    return None
+
+
+@router.post("/{name}/detectors/{index}/when", response_model=None)
+async def set_detector_when(
+    request: Request,
+    name: str,
+    index: int,
+    user: CurrentUser = Depends(require_admin),
+) -> Response:
+    """Set when one detector runs: ``always``, ``day`` or ``night`` (admin-only, hot reload).
+
+    Patches only ``cameras[name].detectors[index].when`` in config.yaml (409 when that
+    entry is gone or has another type), updates the in-memory spec, then rebuilds the
+    camera's detectors.
+    """
+    cfg = get_cfg(request)
+    cam = _camera_or_404(cfg, name)
+    if not 0 <= index < len(cam.detectors):
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} has no detector #{index}")
+    form = await request.form()
+    when = str(form.get("when", "")).strip()
+    if when not in _WHEN_VALUES:
+        raise HTTPException(status_code=422, detail="when must be always, day or night")
+    message = await _patch_detector_key(request, name, index, {"when": when})
+    cam.detectors[index].when = when  # type: ignore[assignment]
+    await run_in_threadpool(_try_rebuild_detectors, request, name)
+    if is_htmx(request):
+        return _detector_list_response(request, cfg, cam, user, message)
+    return RedirectResponse(url=f"/cameras/{name}", status_code=303)
+
+
+@router.post("/{name}/detectors/{index}/classes", response_model=None)
+async def set_detector_classes(
+    request: Request,
+    name: str,
+    index: int,
+    user: CurrentUser = Depends(require_admin),
+) -> Response:
+    """Set the labels one ``onnx`` detector may report (admin-only, hot reload).
+
+    Form field ``classes``: comma-separated labels of that detector's model; empty
+    means every label (the key is written as null). Unknown labels are a 422 naming
+    them; a non-onnx detector is a 422.
+    """
+    cfg = get_cfg(request)
+    cam = _camera_or_404(cfg, name)
+    if not 0 <= index < len(cam.detectors):
+        raise HTTPException(status_code=404, detail=f"Camera {name!r} has no detector #{index}")
+    spec = cam.detectors[index]
+    if spec.type != "onnx":
+        raise HTTPException(status_code=422, detail="classes applies to onnx detectors only")
+    form = await request.form()
+    wanted = [c.strip() for c in str(form.get("classes", "")).split(",") if c.strip()]
+    classes: list[str] | None = wanted or None
+    if classes is not None:
+        model_name = spec.model or DEFAULT_MODEL
+        try:
+            labels = load_labels(load_descriptor(model_name, cfg.runtime.models_dir))
+        except ModelError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        unknown = [c for c in classes if c not in labels]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=unknown_labels_message(name, "classes", unknown, {model_name: labels}),
+            )
+    message = await _patch_detector_key(request, name, index, {"classes": classes})
+    spec.classes = classes
+    await run_in_threadpool(_try_rebuild_detectors, request, name)
     if is_htmx(request):
         return _detector_list_response(request, cfg, cam, user, message)
     return RedirectResponse(url=f"/cameras/{name}", status_code=303)

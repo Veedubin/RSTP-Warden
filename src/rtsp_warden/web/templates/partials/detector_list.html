@@ -7,7 +7,7 @@
   <table class="detector-table">
     <thead>
       <tr>
-        <th>#</th><th>Type</th><th>Model</th><th>Fps</th><th>Device</th><th>Status</th><th>Settings</th>
+        <th>#</th><th>Type</th><th>Model</th><th>Fps</th><th>When</th><th>Device</th><th>Status</th><th>Settings</th>
         {% if is_admin %}<th>Enabled</th>{% endif %}
       </tr>
     </thead>
@@ -37,6 +37,24 @@
           </form>
           {% else %}{{ d.fps_label }}{% endif %}
         </td>
+        <td>
+          {% if is_admin %}
+          <form class="detector-when-form" method="POST"
+                action="/cameras/{{ camera_name }}/detectors/{{ d.index }}/when"
+                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.index }}/when"
+                hx-target="#detector-list"
+                hx-swap="innerHTML"
+                hx-trigger="change">
+            <input type="hidden" name="csrf_token"
+                   value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <select name="when" aria-label="When detector {{ d.index }} runs">
+              {% for value in ('always', 'day', 'night') %}
+              <option value="{{ value }}"{% if d.when == value %} selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% else %}{{ d.when }}{% endif %}
+        </td>
         <td>{% if d.device %}<span class="device-badge">{{ d.device }}</span>{% else %}-{% endif %}</td>
         <td>
           {% if not d.enabled %}off
@@ -50,6 +68,20 @@
         <td>
           <code>{{ d.summary_str }}</code>
           {% if d.type == 'motion' %}<br><small>motion events {{ 'on' if d.motion_events else 'off' }}</small>{% endif %}
+          {% if d.type == 'onnx' and is_admin %}
+          <form class="detector-classes-form" method="POST"
+                action="/cameras/{{ camera_name }}/detectors/{{ d.index }}/classes"
+                hx-post="/cameras/{{ camera_name }}/detectors/{{ d.index }}/classes"
+                hx-target="#detector-list"
+                hx-swap="innerHTML">
+            <input type="hidden" name="csrf_token"
+                   value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+            <input type="text" name="classes" value="{{ d.classes_text }}"
+                   placeholder="all labels"
+                   aria-label="Labels detector {{ d.index }} may report (comma-separated; empty: all)">
+            <button type="submit" class="outline secondary">Set</button>
+          </form>
+          {% elif d.type == 'onnx' and d.classes_text %}<br><small>classes: {{ d.classes_text }}</small>{% endif %}
         </td>
         {% if is_admin %}
         <td>

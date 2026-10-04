@@ -143,13 +143,42 @@ def test_write_failed_message_names_the_path_and_reason(tmp_path: Path) -> None:
 
 
 def test_class_groups_put_unknown_labels_under_other() -> None:
-    assert class_groups_for(["person", "raccoon", "car", "cat", "fox"]) == [
+    assert class_groups_for(["person", "raccoon", "car", "cat", "fox", "toaster"]) == [
         ("person", ["person"]),
         ("pet", ["cat"]),
         ("vehicle", ["car"]),
-        ("other", ["raccoon", "fox"]),
+        ("critter", ["raccoon", "fox"]),
+        ("other", ["toaster"]),
     ]
     assert class_groups_for([]) == []
+
+
+def test_class_groups_know_the_wildlife_labels() -> None:
+    wildlife = [
+        "cat",
+        "dog",
+        "fox",
+        "raccoon",
+        "skunk",
+        "opossum",
+        "squirrel",
+        "rabbit",
+        "coyote",
+        "bobcat",
+        "deer",
+        "bear",
+        "bird",
+        "chipmunk",
+        "woodchuck",
+        "horse",
+        "person",
+        "vehicle",
+    ]
+    groups = dict(class_groups_for(wildlife))
+    assert groups["pet"] == ["cat", "dog"]
+    assert groups["vehicle"] == ["vehicle"]
+    assert groups["person"] == ["person"]
+    assert "other" not in groups
 
 
 def test_class_groups_cover_all_80_default_labels(tmp_path: Path) -> None:

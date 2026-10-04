@@ -57,6 +57,8 @@ RW3_ROUTES = (
     ("GET", "/cameras/{name}/detectors"),
     ("POST", "/cameras/{name}/detectors/{index}/enabled"),
     ("POST", "/cameras/{name}/detectors/{index}/fps"),
+    ("POST", "/cameras/{name}/detectors/{index}/when"),
+    ("POST", "/cameras/{name}/detectors/{index}/classes"),
     ("POST", "/cameras/{name}/detection"),
     ("POST", "/cameras/{name}/rules/test"),
     ("GET", "/cameras/{name}/live-boxes.mjpeg"),
