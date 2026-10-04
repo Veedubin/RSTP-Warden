@@ -173,3 +173,57 @@ def test_fetch_urls_are_the_verified_mirrors() -> None:
     assert fetch.RACCOON_ZIP_URL == (
         "https://github.com/datitran/raccoon_dataset/archive/refs/heads/master.zip"
     )
+
+
+def test_build_records_and_to_coco_use_the_wildlife_categories(tmp_path: Path) -> None:
+    prep = _load("prepare")
+    ena = {
+        "images": [{"id": "1", "file_name": "1.jpg", "width": 1920, "height": 1080}],
+        "annotations": [{"image_id": "1", "category_id": 5, "bbox": [10, 20, 30, 40]}],
+        "categories": [{"id": 5, "name": "Northern Raccoon"}],
+    }
+    oi_boxes = {"img": [{"label": "fox", "xmin": 0.0, "xmax": 0.5, "ymin": 0.0, "ymax": 0.5}]}
+    oi_sizes = {"img": (200, 100)}
+    records = prep.build_records(
+        ena, tmp_path / "ena", oi_boxes, oi_sizes, tmp_path / "oi", raccoon_xmls=[]
+    )
+    assert [r["source"] for r in records] == ["ena24", "openimages"]
+    assert records[0]["file"] == tmp_path / "ena" / "1.jpg"
+    assert records[0]["boxes"] == [("raccoon", [10.0, 20.0, 30.0, 40.0])]
+    assert records[1]["boxes"] == [("fox", [0.0, 0.0, 100.0, 50.0])]
+    coco = prep.to_coco(records, {"ena24/1.jpg": True, "openimages/img.jpg": False})
+    assert [c["name"] for c in coco["categories"]][:4] == ["cat", "dog", "fox", "raccoon"]
+    cats = {c["id"]: c["name"] for c in coco["categories"]}
+    assert [cats[a["category_id"]] for a in coco["annotations"]] == ["raccoon", "fox"]
+    assert coco["images"][0]["is_gray"] is True and coco["images"][1]["is_gray"] is False
+    assert coco["images"][0]["file_name"] == "ena24__1.jpg"
+    assert all(a["iscrowd"] == 0 and a["area"] > 0 for a in coco["annotations"])
+
+
+def test_build_records_reads_voc_xml_and_skips_unknown_roboflow_labels(tmp_path: Path) -> None:
+    prep = _load("prepare")
+    xml_dir = tmp_path / "raccoon_dataset-master" / "annotations"
+    xml_dir.mkdir(parents=True)
+    (xml_dir / "r1.xml").write_text(
+        "<annotation><filename>r1.jpg</filename><size><width>640</width><height>480</height>"
+        "</size><object><name>raccoon</name><bndbox><xmin>10</xmin><ymin>20</ymin>"
+        "<xmax>110</xmax><ymax>220</ymax></bndbox></object></annotation>",
+        encoding="utf-8",
+    )
+    rf = {
+        "images": [{"id": 1, "file_name": "train/a.jpg", "width": 100, "height": 100}],
+        "annotations": [
+            {"image_id": 1, "category_id": 1, "bbox": [1, 2, 3, 4]},
+            {"image_id": 1, "category_id": 2, "bbox": [5, 6, 7, 8]},
+        ],
+        "categories": [{"id": 1, "name": "Raccoon"}, {"id": 2, "name": "cat-raccoons"}],
+    }
+    empty = {"images": [], "annotations": [], "categories": []}
+    records = prep.build_records(
+        empty, tmp_path, {}, {}, tmp_path, raccoon_xmls=[xml_dir / "r1.xml"],
+        roboflow=(rf, tmp_path / "rf"),
+    )  # fmt: skip
+    assert [r["source"] for r in records] == ["raccoon", "roboflow"]
+    assert records[0]["file"] == tmp_path / "raccoon_dataset-master" / "images" / "r1.jpg"
+    assert records[0]["boxes"] == [("raccoon", [10.0, 20.0, 100.0, 200.0])]
+    assert records[1]["boxes"] == [("raccoon", [1.0, 2.0, 3.0, 4.0])]  # "cat-raccoons" dropped

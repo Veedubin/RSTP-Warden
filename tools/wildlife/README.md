@@ -13,7 +13,7 @@ disk under `data/`, and one to three hours.
 All commands run from this directory unless noted.
 
 ```bash
-uv sync                                  # Python 3.11, PyTorch cu128, YOLOX (pinned commit)
+./setup.sh                               # uv sync (Python 3.11, PyTorch cu128) + pinned YOLOX checkout
 uv run python fetch.py                   # ENA24 (3.6 GB), Open Images boxes + images, raccoon set
 uv run python prepare.py                 # one COCO dataset in data/coco/, 90/10 split
 ./train.sh                               # YOLOX-S fine-tune, about 50 epochs (BATCH=16 if OOM)
@@ -47,19 +47,14 @@ Both day and night work because every colour training image is also fed as a gra
 with brightness and noise jitter (`wildlife_data.grayscale_copy`), so the model cannot learn
 "grey frame = raccoon, colour frame = cat".
 
-## If `uv sync` fails on YOLOX
+## Why YOLOX is a checkout, not a dependency
 
-YOLOX's `requirements.txt` pins old helper packages. If the git dependency does not build,
-remove the `yolox @ git+...` line from `pyproject.toml`, add `loguru`, `tabulate`, `thop`,
-`ninja`, `psutil` and `tensorboard` to the dependencies, and clone the pinned checkout:
-
-```bash
-git clone https://github.com/Megvii-BaseDetection/YOLOX.git .yolox
-git -C .yolox checkout 6ddff4824372906469a7fae2dc3206c7aa4bbaee
-export PYTHONPATH=$PWD/.yolox
-```
-
-Every script here works with either installation.
+YOLOX's `setup.py` imports torch to pre-compile an optional extension, so `uv` cannot build it
+as an ordinary dependency. `setup.sh` runs `uv sync` and then fetches the pinned commit
+`6ddff4824372906469a7fae2dc3206c7aa4bbaee` of
+[Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) (Apache-2.0) into
+`.yolox/`; every script here puts that directory on `sys.path` when it exists. The pure-Python
+COCO evaluator is used (no compiled extension needed).
 
 ## Files
 
