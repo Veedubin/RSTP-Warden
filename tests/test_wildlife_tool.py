@@ -154,3 +154,22 @@ def test_grayscale_copy_is_grey_and_darker_or_equal() -> None:
     assert out.shape == img.shape and out.dtype == np.uint8
     assert wd.channel_spread(out) < 12.0  # grey plus a little noise
     assert out.mean() <= img.mean() + 6.0
+
+
+def test_fetch_urls_are_the_verified_mirrors() -> None:
+    fetch = _load("fetch")
+    assert fetch.ENA24_IMAGES_URL == (
+        "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.zip"
+    )
+    assert fetch.ENA24_JSON_URL == (
+        "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.json"
+    )
+    assert fetch.OI_BOXES_CSV_URL == (
+        "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
+    )
+    assert fetch.OI_IMAGE_URL.format(image_id="abc") == (
+        "https://open-images-dataset.s3.amazonaws.com/train/abc.jpg"
+    )
+    assert fetch.RACCOON_ZIP_URL == (
+        "https://github.com/datitran/raccoon_dataset/archive/refs/heads/master.zip"
+    )
