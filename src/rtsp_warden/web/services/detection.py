@@ -121,6 +121,8 @@ def detector_summary(spec: DetectorSpec) -> str:
         for name in _SUMMARY_FIELDS.get(spec.type, ())
         if getattr(spec, name, None) is not None
     ]
+    if spec.when != "always":
+        parts.append(f"when={spec.when}")
     return ", ".join(parts) if parts else "(defaults)"
 
 
@@ -204,6 +206,8 @@ def detector_rows(cfg: AppConfig, runtime: Any, camera: str) -> list[dict[str, A
                 "error": _text(live, "error") or _text(live, "setup_error"),
                 "processed": _count(live, "processed"),
                 "skipped": _count(live, "skipped"),
+                "when": spec.when,
+                "when_skipped": _count(live, "when_skipped"),
                 "errors": _count(live, "errors"),
             }
         )

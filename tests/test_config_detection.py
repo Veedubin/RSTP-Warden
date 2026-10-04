@@ -522,3 +522,14 @@ def test_stationary_iou_defaults_to_0_6_and_accepts_zero_and_one() -> None:
 def test_stationary_iou_outside_zero_to_one_is_rejected(bad: float) -> None:
     with pytest.raises(ValidationError, match="stationary_iou must be between 0 and 1"):
         _cam(stationary_iou=bad)
+
+
+# --- RW-5: when ---------------------------------------------------------------------------------
+
+
+def test_detector_when_defaults_to_always_and_accepts_day_night() -> None:
+    assert DetectorSpec(type="motion").when == "always"
+    assert DetectorSpec(type="onnx", when="night").when == "night"
+    assert DetectorSpec(type="motion", when="day").when == "day"
+    with pytest.raises(ValidationError):
+        DetectorSpec(type="onnx", when="dusk")

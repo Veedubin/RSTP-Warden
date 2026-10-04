@@ -23,6 +23,7 @@ from rtsp_warden.web.services.detection import (
     _persist_detector_entry,
     class_groups_for,
     detector_rows,
+    detector_summary,
     fire_test_event,
     label_choices,
     runtime_detection_status,
@@ -383,3 +384,14 @@ def test_concurrent_toggle_and_field_save_keep_both_changes(tmp_path: Path) -> N
     assert cam["detectors"][0]["fps"] == float(rounds)
     assert cam["track_grace_seconds"] == float(rounds)
     assert cam["main_url"] == "${CAM_URL}"
+
+
+# --- RW-5: when ---------------------------------------------------------------------------------
+
+
+def test_detector_summary_shows_when_unless_always() -> None:
+    assert "when=" not in detector_summary(DetectorSpec(type="onnx"))
+    assert detector_summary(DetectorSpec(type="onnx", when="night")) == "when=night"
+    assert detector_summary(DetectorSpec(type="motion", min_area=500, when="day")) == (
+        "min_area=500, when=day"
+    )

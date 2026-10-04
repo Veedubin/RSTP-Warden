@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 DetectorType = Literal["motion", "person", "vehicle", "dnn", "custom", "onnx"]
 DetectorDevice = Literal["auto", "cuda", "cpu"]
+#: When a detector runs: always, only on colour (day) frames, or only on IR (night) frames.
+DetectorWhen = Literal["always", "day", "night"]
 
 # Kept for one release; each logs a one-time deprecation warning naming `onnx`.
 LEGACY_DETECTOR_TYPES: frozenset[str] = frozenset({"person", "vehicle", "dnn"})
@@ -54,6 +56,7 @@ class DetectorSpec(BaseModel):
     fps: float | None = None  # None = the camera's detect_fps
     model: str | None = None  # onnx: model registry name; None = "yolox-s"
     device: DetectorDevice = "auto"  # onnx: execution provider choice
+    when: DetectorWhen = "always"  # run always, by day only, or at night only (RW-5)
     events: bool | None = None  # motion: write events; None = CameraConfig decides
     config: dict[str, Any] = Field(default_factory=dict)
     # Type-specific fields (optional, only used by some types)
@@ -342,6 +345,7 @@ class DetectorSlot:
     tracked: bool  # onnx output goes to the Tracker, not to result_sinks
     motion_events: bool  # motion spec whose events resolve true (ruling R11)
     input_width: int | None  # model input width (onnx), None otherwise
+    when: str = "always"  # the spec's when; the runner skips the slot in the other state
 
 
 def _make_slot(
@@ -357,6 +361,7 @@ def _make_slot(
         tracked=spec.type == "onnx",
         motion_events=spec.type == "motion" and camera_cfg.motion_events_enabled(spec),
         input_width=int(width) if isinstance(width, int) else None,
+        when=spec.when,
     )
 
 

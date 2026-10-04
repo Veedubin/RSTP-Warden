@@ -540,6 +540,8 @@ def test_status_detector_rows_are_plain_json() -> None:
             "fps": 2.0,
             "processed": 3,
             "skipped": 3,
+            "when": "always",
+            "when_skipped": 0,
             "errors": 0,
             "setup_error": None,
         }
@@ -796,3 +798,63 @@ def test_masks_do_not_bias_the_night_measure() -> None:
     )
     runner._process_job(_job_bytes(1.0, _colour_jpeg()))
     assert runner.status()["night"] is False
+
+
+# --- RW-5: when: always | day | night ------------------------------------------------------------
+
+
+def _when_slot(index: int, det: ScriptedDetector, when: str) -> DetectorSlot:
+    return DetectorSlot(
+        index=index,
+        spec=DetectorSpec(type="onnx", when=when),
+        detector=det,
+        fps=5.0,
+        tracked=True,
+        motion_events=False,
+        input_width=640,
+        when=when,
+    )
+
+
+def test_when_night_slot_runs_only_at_night() -> None:
+    always = ScriptedDetector(lambda ts: [])
+    nightly = ScriptedDetector(lambda ts: [])
+    runner = DetectorRunner(
+        name="d",
+        slots=(_when_slot(0, always, "always"), _when_slot(1, nightly, "night")),
+        worker_count=1,
+        tap_fps=5.0,
+        tracker=Tracker(grace_seconds=1.0, min_frames=1),
+    )
+    runner._process_job(_job(1.0))  # black JPEG: night
+    assert always.calls == [1.0] and nightly.calls == [1.0]
+    colour = _colour_jpeg()
+    for ts in (2.0, 3.0, 4.0):
+        runner._process_job(_job_bytes(ts, colour))  # day from ts 4.0
+    runner._process_job(_job_bytes(5.0, colour))
+    assert nightly.calls == [1.0, 2.0, 3.0]
+    assert always.calls == [1.0, 2.0, 3.0, 4.0, 5.0]
+    rows = runner.status()["detectors"]
+    assert rows[1]["when"] == "night" and rows[1]["when_skipped"] == 2
+    assert rows[0]["when"] == "always" and rows[0]["when_skipped"] == 0
+    assert rows[1]["skipped"] == 0  # the fps schedule is a separate counter
+
+
+def test_when_skipped_slot_is_reported_as_running() -> None:
+    """(review focus) A paused slot is configured and healthy; it just did not run."""
+    day = ScriptedDetector(lambda ts: [])
+    runner = DetectorRunner(
+        name="d",
+        slots=(_when_slot(0, day, "day"),),
+        worker_count=1,
+        tap_fps=5.0,
+        tracker=Tracker(grace_seconds=1.0, min_frames=1),
+    )
+    runner.setup()
+    try:
+        runner._process_job(_job(1.0))  # night: the day slot pauses
+    finally:
+        runner.teardown()
+    row = runner.status()["detectors"][0]
+    assert row["setup_error"] is None and row["processed"] == 0 and row["when_skipped"] == 1
+    assert day.calls == []

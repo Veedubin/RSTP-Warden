@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 
 from .base import Detection, Detector
-from .daylight import DayNight
+from .daylight import DayNight, allows
 from .event_builder import LiveBox, LiveBoxes
 from .grid_mask import GridMask
 from .roi import ROI, Mask, apply_masks, filter_by_roi
@@ -118,6 +118,7 @@ class DetectorRunner:
         self._slot_processed: list[int] = [0] * count
         self._slot_skipped: list[int] = [0] * count
         self._slot_errors: list[int] = [0] * count
+        self._slot_when_skipped: list[int] = [0] * count  # paused by `when` (RW-5)
         self._setup_errors: list[str | None] = [None] * count
         self._due_tolerance: float = 0.25 / self.tap_fps if self.tap_fps > 0 else 0.0
         self._last_ts: float = 0.0
@@ -232,6 +233,8 @@ class DetectorRunner:
             "fps": float(slot.fps),
             "processed": int(self._slot_processed[i]),
             "skipped": int(self._slot_skipped[i]),
+            "when": str(slot.when),
+            "when_skipped": int(self._slot_when_skipped[i]),
             "errors": int(self._slot_errors[i]),
             "setup_error": self._setup_errors[i],
         }
@@ -299,6 +302,9 @@ class DetectorRunner:
             if self._setup_errors[i] is not None:
                 continue
             slot = self.slots[i] if self.slots else None
+            if slot is not None and not allows(slot.when, night):
+                self._slot_when_skipped[i] += 1
+                continue
             if slot is not None and not self._due(i, slot.fps, job.ts_unix):
                 self._slot_skipped[i] += 1
                 continue

@@ -87,6 +87,8 @@ class DetectorStatus(TypedDict):
     fps: float | None  # rate this detector runs at
     processed: int
     skipped: int
+    when: str  # "always" | "day" | "night": when this detector is allowed to run
+    when_skipped: int  # frames skipped because the day/night state did not match
     errors: int
     fallback_warning: str | None  # "CUDA requested but unavailable; running on ..."
     error: str | None  # model load failure (runner "error") or a setup() exception ("setup_error")
@@ -377,6 +379,8 @@ def summarize_detection(raw: Any) -> DetectionStatus | None:
                 "fps": _as_float(entry.get("fps")),
                 "processed": _as_int(entry.get("processed")),
                 "skipped": _as_int(entry.get("skipped")),
+                "when": _as_text(entry.get("when")) or "always",
+                "when_skipped": _as_int(entry.get("when_skipped")),
                 "errors": _as_int(entry.get("errors")),
                 "fallback_warning": _as_text(entry.get("fallback_warning")),
                 "error": _as_text(entry.get("error")) or _as_text(entry.get("setup_error")),
