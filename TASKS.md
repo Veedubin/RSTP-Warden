@@ -31,6 +31,17 @@ One card per unit of work. Status phrases are updated in place; history stays in
   "I was able to change the profile just fine. It seems to work. Motion detection and object recognition works."
   Not yet observed live: a real event's full-size thumbnail and the "held back" count growing.
 
+## RW-5 — Wildlife detection: cat / fox / raccoon, day and night (added 2026-10-04)
+- Spec: `docs/superpowers/specs/2026-10-04-wildlife-detection-design.md`
+- Plan: `docs/superpowers/plans/2026-10-04-rw5-wildlife-detection.md` (12 tasks, one implementer, no plan workflow)
+- Scope (owner's "go"): a second `onnx` model `wildlife-yolox-s` (YOLOX-S fine-tuned on ENA24 + Open Images +
+  raccoon sets, 18 labels in `tools/wildlife/wildlife.txt`, grayscale augmentation so one model covers day and IR
+  night); runtime: frame-based `night` flag (status, event metadata, badge), `when: always|day|night` and
+  per-slot `classes` on detector specs with Detection-panel controls; training tool in `tools/wildlife/` (separate
+  uv project, never in the wheel). No rule gating on night in this release; the owner wants every event of every
+  label visible until the model is trusted. Release 1.4.0.
+- Status: **in progress** 2026-10-04. Task 1 (daylight module) started.
+
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.
