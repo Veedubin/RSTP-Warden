@@ -1,7 +1,7 @@
 """Tests for ONVIF stream-URI discovery (onvif/media.py).
 
 The fake camera behaves like the owner's port-forwarded Foscam: ONVIF on 888, WS-UsernameToken
-auth, and its own LAN address (192.168.4.29) in every XAddr and stream URI.
+auth, and its own LAN address (192.0.2.29) in every XAddr and stream URI.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from rtsp_warden.onvif.soap import (
     local_tag,
 )
 
-LAN = "192.168.4.29"  # the camera's own address, reported in every XAddr and URI
+LAN = "192.0.2.29"  # the camera's own address, reported in every XAddr and URI
 HOST = "192.0.2.10"  # the address the camera is reached on (port forward)
 USER = "admin"
 PASSWORD = "p@ss/w#rd?%"  # review focus 1: URL-special characters

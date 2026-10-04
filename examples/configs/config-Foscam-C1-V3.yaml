@@ -6,7 +6,7 @@
 # rtsp-warden expands ${NAME} references in config.yaml at load time.
 cameras:
   - name: front
-    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:554/videoMain"
+    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.0.2.72:554/videoMain"
     vendor:               # "Camera settings" in the web UI: Foscam's HTTP CGI on port 88
       type: foscam
       port: 88

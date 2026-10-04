@@ -32208,7 +32208,7 @@ def test_foscam_example_runs_detection_on_the_main_stream_only() -> None:
     cfg = load_config(FOSCAM)
     (cam,) = cfg.cameras
     assert cam.sub_url is None
-    assert cam.main_url == "rtsp://u:p@192.168.1.72:554/videoMain"
+    assert cam.main_url == "rtsp://u:p@192.0.2.72:554/videoMain"
     assert cam.proxy.stream == "main"
     assert cam.detect_fps == 5.0
     assert [(s.type, s.enabled) for s in cam.detectors] == [("motion", True), ("onnx", True)]
@@ -32363,7 +32363,7 @@ Replace the whole of `/home/jcharles/Projects/python/rtsp-warden_v0.2.0/.worktre
 # rtsp-warden expands ${NAME} references in config.yaml at load time.
 cameras:
   - name: front
-    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:554/videoMain"
+    main_url: "rtsp://${CAM_USER}:${CAM_PASS}@192.0.2.72:554/videoMain"
 
     record:
       enabled: true
@@ -34192,7 +34192,7 @@ not fixed inside Task 19.
 - Web UI: `http://127.0.0.1:8097` (RW-2 Task 12 uses 8098 and RW-2 Task 11 uses 8099). The camera's MJPEG side
   server is pinned to `127.0.0.1:9011` so it is not exposed on the LAN. A local "black hole" on `127.0.0.1:8199`
   accepts connections and never answers; it plays a stalled download in phase A.
-- Camera: Foscam C1 V3 through the owner's port forward at `192.168.1.72` (RTSP 554). `videoMain` is H.264
+- Camera: Foscam C1 V3 through the owner's port forward at `192.0.2.72` (RTSP 554). `videoMain` is H.264
   1280x720 at 15 fps; `videoSub` sends no video, so the config has `main_url` only and the proxy and frame tap read
   the main stream (`CameraConfig._fallback_proxy_stream`, `src/rtsp_warden/config.py:313-318` on master).
 - Phases: A = `serve` run 1 with the model download stalled; B = run 2 with the real `yolox-s` on the CPU build (the
@@ -34578,7 +34578,7 @@ ls -d /home/jcharles/Projects/python/rtsp-warden_v0.2.0/.worktrees/rw3-foscam-sc
 ffmpeg -version | head -1
 ffprobe -version | head -1
 ss -Hltn 'sport = :8097 or sport = :9011 or sport = :8199'
-timeout 3 bash -c '</dev/tcp/192.168.1.72/554' && echo rtsp-554-open
+timeout 3 bash -c '</dev/tcp/192.0.2.72/554' && echo rtsp-554-open
 timeout 5 bash -c '</dev/tcp/github.com/443' && echo github-443-open
 nvidia-smi -L
 ```
@@ -34683,7 +34683,7 @@ actions:
 
 cameras:
   - name: foscam-c1
-    main_url: rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:554/videoMain
+    main_url: rtsp://${CAM_USER}:${CAM_PASS}@192.0.2.72:554/videoMain
     detect_fps: 5
     detect_classes: [person]
     record:
@@ -34825,7 +34825,7 @@ DB = S / "warden.db"
 REC = S / "recordings"
 MODELS = S / "models"
 ENV_KEYS = ("CAM_USER", "CAM_PASS", "NTFY_URL", "NTFY_TOPIC", "NTFY_TOKEN")
-CAM_URL_REF = "rtsp://${CAM_USER}:${CAM_PASS}@192.168.1.72:554/videoMain"
+CAM_URL_REF = "rtsp://${CAM_USER}:${CAM_PASS}@192.0.2.72:554/videoMain"
 PAGES = (
     "/",
     "/cameras",
@@ -35011,7 +35011,7 @@ def camera_ffmpeg_pids() -> list[int]:
     for pid, argv in proc_cmdlines():
         exe = os.path.basename(argv[0].decode(errors="replace"))
         if exe.startswith(("ffmpeg", "ffprobe")) and any(
-            b"videoMain" in a or b"192.168.1.72" in a for a in argv[1:]
+            b"videoMain" in a or b"192.0.2.72" in a for a in argv[1:]
         ):
             pids.append(pid)
     return sorted(pids)
@@ -35054,7 +35054,7 @@ def cmd_env() -> int:
     try:
         parts = urlsplit(url)
         parsed = (parts.hostname, parts.port, parts.path)
-        print("camera_url_parses:", parsed == ("192.168.1.72", 554, "/videoMain"))
+        print("camera_url_parses:", parsed == ("192.0.2.72", 554, "/videoMain"))
         same = unquote(parts.username or "") == unquote(user) and unquote(
             parts.password or ""
         ) == unquote(pw)
@@ -36437,7 +36437,7 @@ download it again?" Write down both answers.
 
    Run with the owner's OK; not a merge gate. `serve --web-port 8097` ran from the scratch folder
    `.worktrees/rw3-foscam-scratch` (config, `.env`, database, logs, recordings, model; never committed; {CLEANUP}).
-   {FFMPEG}; {ORT}. Camera: Foscam C1 V3 through 192.168.1.72, `videoMain` only, `detect_fps: 5`, onnx `yolox-s` at
+   {FFMPEG}; {ORT}. Camera: Foscam C1 V3 through 192.0.2.72, `videoMain` only, `detect_fps: 5`, onnx `yolox-s` at
    `fps: 2`, rule `person-any-time` (min confidence 0.6, cooldown 60 s, clip) to an ntfy test topic.
 
    | Step | Check | Expected | Observed |

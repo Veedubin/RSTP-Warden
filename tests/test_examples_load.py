@@ -162,7 +162,7 @@ def test_foscam_example_runs_detection_on_the_main_stream_only() -> None:
     cfg = load_config(FOSCAM)
     (cam,) = cfg.cameras
     assert cam.sub_url is None
-    assert cam.main_url == "rtsp://u:p@192.168.1.72:554/videoMain"
+    assert cam.main_url == "rtsp://u:p@192.0.2.72:554/videoMain"
     assert cam.proxy.stream == "main"
     assert cam.detect_fps == 5.0
     assert [(s.type, s.enabled) for s in cam.detectors] == [("motion", True), ("onnx", True)]

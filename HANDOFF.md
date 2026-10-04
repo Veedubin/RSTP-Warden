@@ -20,6 +20,13 @@ flag with the brightness floor. The owner's verdict on RW-5: "seems great".
   page text replaced by `camera.lan`) and `docs/screenshots/*.png` (dashboard, events, camera, camera-settings,
   detection-classes, health, actions) referenced from a README "Screenshots" section.
 
+**Deployment moved out of this checkout (owner's ask).** The live stack now runs from the private repo
+`~/Projects/RSTP-Warden-Home` (compose with the CDI GPU reservation and `TZ=America/Chicago`, `config/config.yaml`,
+gitignored `.env` / `data/` / `recordings/`; `WARDEN_SRC` in its `.env` points the build at this checkout). The
+move was `docker compose down` here, `mv` of the four paths, `docker compose up -d --build` there: container clock
+on CDT, both detectors on CUDA, camera ok. This checkout holds no deployment files any more. The camera's real LAN
+addresses were replaced by the documentation range (192.0.2.x) throughout this repo.
+
 **Owner's clearing, done live.** On the owner's word the 67 test events were deleted through the real Events page in a
 headless browser ("Delete 67 events" → confirm → flash "Deleted 67 events"; 67 thumbnails gone, 0 action_runs left),
 then one "Fire test event" (placeholder picture, nothing personal) gave the dashboard and events screenshots a card to
@@ -236,7 +243,7 @@ in `dcadb42`.
 
 **Next, in order.** 1. Owner says "push" → `git push origin master` (explicit OK required; never force-push without it).
 2. Owner rotates the Foscam password and decides on the history rewrite. 3. Manual camera verification per the two plan tasks
-(camera at 192.168.1.72, main stream only; login in `.env`). 4. Build and test `Dockerfile.cuda` on a GPU host.
+(camera at 192.0.2.72, main stream only; login in `.env`). 4. Build and test `Dockerfile.cuda` on a GPU host.
 
 ## 2026-10-02 (night) — superseded by the block above: RW-2 and RW-3 built and merged; master is the integrated tree, not pushed
 

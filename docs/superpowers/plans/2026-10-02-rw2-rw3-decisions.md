@@ -120,7 +120,7 @@ R20. **Thumbnails and clips** live under `<record.output_dir>/<camera>/thumbnail
     warning at config load and the clip job is skipped.
 R21. **Event-mode recording** (`record.mode: event`) stays out of scope: with the tap fed by the same ffmpeg that
     event mode stops, detection cannot start recording. The plan documents the limitation; nothing else changes.
-R22. **Manual camera tests** (Foscam at 192.168.1.72, `videoMain`, credentials in the owner's notes) are the last
+R22. **Manual camera tests** (Foscam at 192.0.2.72, `videoMain`, credentials in the owner's notes) are the last
     task of each plan and run only after the owner says so. They are never a prerequisite for the gate.
 
 ## File ownership between RW-2 (merged first) and RW-3 (rebased on top)

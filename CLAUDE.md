@@ -67,6 +67,14 @@ first) and refuses to start against a revision it does not know.
 **Version bump** touches three places: `pyproject.toml`, `src/rtsp_warden/__init__.py`,
 and the version assertion in `tests/test_admin.py`.
 
+**Where the owner's stack runs.** Not here. The live home deployment (compose file with the GPU reservation and
+`TZ`, the live `config/config.yaml`, `.env`, `data/`, `recordings/`) lives in the private repo
+`~/Projects/RSTP-Warden-Home`; its compose builds `Dockerfile.cuda` from this checkout (`WARDEN_SRC` in its
+`.env`) or from the pushed master. Run `docker compose up -d --build` there after a push to deploy. Nothing under
+this checkout is mounted into the container any more; `config/`, `data/`, `recordings/`, `.env` stay gitignored
+here only for ad-hoc local runs. Never put the house's time zone, camera addresses or logins into this repo
+(docs and tests use the documentation range 192.0.2.x for camera addresses).
+
 **Docker.** `docker compose up -d` builds `Dockerfile.distroless` (default, no shell).
 `Dockerfile` is the slim debuggable variant. Both run
 `rtsp-warden serve -c /app/config/config.yaml --web --web-port 8080`; the bind host comes
