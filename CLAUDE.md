@@ -9,7 +9,7 @@ ffmpeg per camera stream, records `.ts` segments, runs detectors in-process (YOL
 ONNX Runtime, CPU or CUDA, plus OpenCV motion), turns tracked objects into events with
 thumbnails, sends them through per-camera rules to ntfy / Apprise / webhook actions, and
 serves a FastAPI web UI (htmx + Alpine + Pico, no JS build step). Package
-version is 1.3.0 (`pyproject.toml` + `src/rtsp_warden/__init__.py`); the directory
+version is 1.4.0 (`pyproject.toml` + `src/rtsp_warden/__init__.py`); the directory
 name `rtsp-warden_v0.2.0` is historical. Remote: `Veedubin/RSTP-Warden` (public, MIT).
 
 The README was rewritten on 2026-10-02 to match the code; when they disagree, trust the
@@ -130,6 +130,21 @@ RW-4 (2026-10-03) added two rules inside the EventBuilder: a track whose box sti
 the move frame); and thumbnails come from the camera `FrameHub`'s short history (`frame_near`) at full preview size when
 the camera has an MJPEG hub, never downgraded afterwards. `EventBuilder` itself defaults both off; `_make_runner` wires
 them. Status surfaces carry `stationary_held` / `stationary_suppressed`.
+
+RW-5 (2026-10-04) added the day/night state and two detector-spec fields. `detectors/daylight.py`:
+`channel_spread` (mean `max(B,G,R) - min(B,G,R)` over a 4x-subsampled frame) and `DayNight` (first frame sets
+the state, then `SWITCH_FRAMES = 3` consecutive frames on the other side of `NIGHT_SPREAD = 4.0` flip it). The
+runner updates it on every decoded frame **before** `apply_masks` (masked pixels are black), sets
+`event_builder.night`, which lands in every event's metadata as `"night"`, and reports `night` / `night_since` /
+`night_switches` in its status. `DetectorSpec.when` (`always | day | night`) is checked with `daylight.allows`
+before the fps schedule and counted as `when_skipped`; `DetectorSpec.classes` (onnx only, validated against that
+model's labels in `AppConfig._validate_labels`) is intersected with `detect_classes` through
+`class_filter.effective_classes`, and two onnx slots that may report the same label log a warning
+(`registry._warn_overlapping_labels`). Web: `POST /cameras/{name}/detectors/{index}/when` and `.../classes` patch
+only their key (`routes/detection._patch_detector_key`); `event_to_dict` exposes `night` for the badge. The
+wildlife model is trained by `tools/wildlife/` (its own uv project, YOLOX as a pinned source checkout in
+`.yolox/` because its `setup.py` imports torch; never imported by the package) and installed as a user model
+`wildlife-yolox-s`; `tests/test_wildlife_tool.py` imports the tool's pure helpers by file path.
 
 The `Detector` protocol (`detectors/base.py`) is `name`, `kind`, `setup()`,
 `process(frame_bgr, ts_unix) -> list[Detection]` (bbox is x, y, w, h in frame pixels),

@@ -10,6 +10,21 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-04-wildlife-detection-design.md`
 
+## Deviations found while executing (2026-10-04)
+
+- **YOLOX is a pinned source checkout, not a uv dependency.** Its `setup.py` imports torch at build
+  time (`AssertionError: torch is required for pre-compiling ops`), so `uv sync` cannot build the git
+  dependency. `tools/wildlife/setup.sh` runs `uv sync` and fetches commit
+  `6ddff4824372906469a7fae2dc3206c7aa4bbaee` into `tools/wildlife/.yolox/`; every script puts that
+  directory on `sys.path`. The YOLOX runtime helpers (`loguru`, `tabulate`, `thop`, `ninja`, `psutil`,
+  `tensorboard`) are the project's dependencies instead.
+- **No `train.py` of our own.** With the checkout present, `train.sh` runs YOLOX's `tools/train.py -f exp.py`
+  directly (Task 10's file list shrinks by one; `exp.py` is loaded through YOLOX's `get_exp`).
+- **The public ENA24 zip has no human images** (8789 of the 9676 listed), so `person` had zero boxes.
+  Open Images `Person` and `Car` (capped at 1500 images each) were added as hard negatives, and the
+  Open Images validation and test splits add fox, raccoon and skunk images (the train split alone has
+  only 422 fox and 285 raccoon images without groups and drawings).
+
 ## Global Constraints
 
 - `uv` only: `uv run pytest`, `uv run ruff check src/ tests/`, `uv run ruff format --check src/ tests/`; the gate is "no new ruff errors" over the 4 baseline E501 in `cli.py`, `proxy/mjpeg.py`, `recorder.py`.

@@ -76,7 +76,7 @@ in as hard negatives (a coyote must not be called a fox, a person not a bear); t
 | Source | Taken | Mapping | License |
 |---|---|---|---|
 | LILA ENA24-detection (~10k camera-trap images, boxes, 3.6 GB) | every image with a box | ENA24 category → label above; `Human` → `person`, `Chicken` / `Wild Turkey` / `American Crow` / `Bird` → `bird`, squirrels → `squirrel`, foxes → `fox` | CDLA-Permissive 1.0 |
-| Open Images V7 boxes | `Cat`, `Fox`, `Raccoon`, `Skunk`, `Squirrel`, `Rabbit`, `Dog`, capped at 1500 images per class, train split, images over plain HTTPS from the public S3 bucket | class name lower-cased | CC BY 4.0 / CC BY 2.0 |
+| Open Images V7 boxes | `Cat`, `Fox`, `Raccoon`, `Skunk`, `Squirrel`, `Rabbit`, `Dog`, plus `Person` and `Car` as hard negatives (the public ENA24 zip has no human images), capped at 1500 images per class from the train split; the validation and test splits add fox, raccoon and skunk only; images over plain HTTPS from the public S3 bucket | class name lower-cased, `Car` → `vehicle` | CC BY 4.0 / CC BY 2.0 |
 | Dat Tran raccoon set (196 images, Pascal VOC xml) | all | `raccoon` | MIT |
 | Roboflow "Cat/Raccoons" (3262 images) | all, **only if the owner places the COCO-format export in `tools/wildlife/data/raw/roboflow-cat-raccoons/`** | `cat`, `raccoon` | CC BY 4.0 |
 
@@ -110,7 +110,9 @@ Commands, each a script with `--help`, documented in `tools/wildlife/README.md`:
   `yolox_s.pth`, about 50 epochs, batch sized for 16 GB, mosaic and mixup as YOLOX ships them,
   plus the grayscale copy augmentation (probability 0.5 on colour images: convert to gray,
   replicate to 3 channels, random brightness scale 0.4–1.0, Gaussian noise).
-- `train.sh`: `python -m yolox.tools.train -f exp.py -d 1 -b <batch> --fp16 -o -c yolox_s.pth`.
+- `train.sh`: YOLOX's own `tools/train.py -f exp.py -d 1 -b <batch> --fp16 -c yolox_s.pth` from the
+  pinned checkout in `.yolox/` (YOLOX's `setup.py` needs torch at build time, so it is a source
+  checkout made by `setup.sh`, not a dependency).
 - `evaluate.py`: COCO eval on the full, colour and grayscale validation sets, AP50 per class.
 - `export.py`: ONNX export with the raw head (`decode_in_inference = False`, the tensor
   contract of the `yolox-s` descriptor: input `images` `[1,3,640,640]`, output `[1,8400,23]`),

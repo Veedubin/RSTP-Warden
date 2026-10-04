@@ -380,7 +380,7 @@ class TestClassesMode:
         assert 'name="class_raccoon"' in r.text
         assert 'name="class_fox"' in r.text
         assert "toothbrush" not in r.text
-        assert "Other (2)" in r.text
+        assert "Critter (2)" in r.text  # raccoon and fox are known wildlife labels (RW-5)
 
         r = client.post(
             "/cameras/yard/detection-classes",

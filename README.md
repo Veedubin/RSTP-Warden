@@ -249,6 +249,8 @@ cameras:
         model: yolox-s                     # yolox-s (default), yolox-nano, or a model in runtime.models_dir
         device: auto                       # auto | cuda | cpu
         fps: 2
+        when: always                       # always | day | night (night = IR / grayscale frames)
+        # classes: [person, car]           # labels this detector may report (default: all of its model)
         min_confidence: 0.5                # default: from sensitivity (0.5 at 50)
 
     sensitivity: 50                        # 0-100: motion threshold and the default min_confidence
@@ -451,7 +453,7 @@ Each camera's preview stream (`proxy.stream`; the main stream when there is no `
 
 | Detector | What | Notes |
 |---|---|---|
-| `onnx` | YOLOX on ONNX Runtime, 80 COCO classes | The object detector. `model: yolox-s` (default, 640 px input, about 34 MB) or `yolox-nano` (416 px, about 3.5 MB, for small CPUs) |
+| `onnx` | YOLOX on ONNX Runtime | The object detector. `model: yolox-s` (default, 80 COCO classes, 640 px input, about 34 MB), `yolox-nano` (416 px, about 3.5 MB, for small CPUs), or a model of your own such as the wildlife model below. A camera may run several |
 | `motion` | MOG2 background subtraction | Very cheap. Its events are stored only when no `onnx` detector is enabled, or with `events: true` |
 | `custom` | Your class via `import_path: module:Class` | Implements the `Detector` protocol (see Architecture invariants) |
 | `person`, `vehicle`, `dnn` | HOG, Haar cascade, YOLOv4-tiny | Deprecated: each logs a warning naming `onnx`, and they are removed in the next release |
@@ -478,16 +480,41 @@ onnx detector onnx (model yolox-s, device auto) provider: CUDAExecutionProvider
 
 **Classes and tuning per camera:**
 - `detect_classes` — model labels to keep (for YOLOX, COCO names such as `person`, `car`, `dog`, `cat`); omit it for all labels. Unknown names fail config validation with the list of valid ones. The detection classes page offers "all" or a custom list.
+- `classes` per `onnx` detector — the labels *that* detector may report, validated against its own model; the camera's `detect_classes` still applies on top. With two models on one camera, give each its own labels: two detectors that may both report `dog` open two events for one dog (the log warns).
+- `when` per detector — `always` (default), `day` or `night`: the runner skips the detector while the camera's day/night state does not match (see Day and night below). Nothing in this release gates rules on it.
 - `min_confidence` per `onnx` detector — when unset it comes from `sensitivity` (0.5 at 50).
 - `sensitivity` (0-100) — single knob that also scales the motion detector's threshold. Higher = more sensitive.
 - `enabled` per detector — toggle individual detectors on/off without deleting config. The web UI identifies a detector by its position in `detectors:` and writes back only that entry, so other keys and `${VAR}` references survive.
 - **Zones** — grid zones of N×M cells. `kind: ignore` (the default) drops detections whose box centre is in a blocked cell. `kind: area` never drops anything: its active (not blocked) cells form a named area, and an event's `zone` is the first `area` zone that contains the centre of its best box. Cells map onto the frame the detectors actually see, whatever the zone's saved `frame_width`/`frame_height`. A detector also accepts a polygon `roi`; a detection must pass the `roi` and every `ignore` zone.
 
-**Hot reload:** web UI saves write `config.yaml`. A detector `enabled` toggle rebuilds that camera's detectors at once; sensitivity and detection classes rebuild when saved with "Save and reload"; zones rebuild from the zones page's reload button. `POST /cameras/{name}/reload` rebuilds from the in-memory config; it does not re-read the YAML, so hand edits still need a restart. A rebuild restarts the tracker empty, and restarts the camera's ingest only when the frame-tap settings change (`detect_fps`, or a model with another input width).
+**Hot reload:** web UI saves write `config.yaml`. A detector `enabled`, `fps`, `when` or `classes` change rebuilds that camera's detectors at once; sensitivity and detection classes rebuild when saved with "Save and reload"; zones rebuild from the zones page's reload button. `POST /cameras/{name}/reload` rebuilds from the in-memory config; it does not re-read the YAML, so hand edits still need a restart. A rebuild restarts the tracker empty, and restarts the camera's ingest only when the frame-tap settings change (`detect_fps`, or a model with another input width).
+
+**Day and night.** An IR camera flips its IR-cut filter after dark and the frame turns grayscale. The runner measures that on every decoded frame (the mean spread between the colour channels, before the privacy masks) and keeps a per-camera state with three frames of hysteresis, so dusk does not flap it. The state shows on the Detection panel ("night mode on / off"), in `/status.json`, as a `night` badge on events (every object and motion event stores `"night": true|false` in its metadata), and it drives a detector's `when`. A very dark colour frame also counts as night, which is the intended meaning: IR, or too dark for colour.
+
+**Wildlife model (cat, fox, raccoon).** COCO has no fox or raccoon, so a raccoon on the lawn comes out of `yolox-s` as `cat`, `dog`, `bear` or nothing. `tools/wildlife/` trains a second YOLOX-S, `wildlife-yolox-s`, on camera-trap and photo datasets (ENA24, Open Images, two raccoon sets; CDLA-Permissive, CC BY and MIT data) with 18 labels — `cat, dog, fox, raccoon, skunk, opossum, squirrel, rabbit, coyote, bobcat, deer, bear, bird, chipmunk, woodchuck, horse, person, vehicle` — and feeds every colour training image as a grayscale copy as well, so one model works by day and under IR at night. The result is an ordinary user model (`<models_dir>/wildlife-yolox-s/`, see `tools/wildlife/README.md`); run it next to `yolox-s`, each with its own `classes`:
+
+```yaml
+    detect_classes: [person, car, truck, bicycle, motorcycle, cat, dog, fox, raccoon, skunk, opossum, squirrel, rabbit]
+    detectors:
+      - type: motion
+        fps: 5
+      - type: onnx
+        model: yolox-s
+        classes: [person, car, truck, bicycle, motorcycle]
+        fps: 2
+        min_confidence: 0.6
+      - type: onnx
+        model: wildlife-yolox-s
+        classes: [cat, dog, fox, raccoon, skunk, opossum, squirrel, rabbit]
+        fps: 2
+        min_confidence: 0.5
+```
+
+`dog` is on the wildlife detector only. Rules can then say `labels: [raccoon]`. Should the single model ever prove weak at night, a night-specialised one is a second detector with `when: night` and no new code.
 
 **Live boxes:** the "show boxes" switch next to the camera's live preview (off by default, remembered per browser) streams `/cameras/{name}/live-boxes.mjpeg`, with the tracker's current boxes drawn.
 
-**Status:** the camera card and the `/health` page show the provider in use (`CUDAExecutionProvider` or `CPUExecutionProvider`), a warning when CUDA was requested but not used or a model failed to load, and processed / dropped frame counts. `/status.json` and `rtsp-warden status` carry the same values per camera.
+**Status:** the camera card and the `/health` page show the provider in use (`CUDAExecutionProvider` or `CPUExecutionProvider`), a warning when CUDA was requested but not used or a model failed to load, and processed / dropped frame counts. `/status.json` and `rtsp-warden status` carry the same values per camera, plus the day/night state (`night`, `night_since`, `night_switches`) and each detector's `when` and `when_skipped`.
 
 ### Events
 
@@ -601,6 +628,8 @@ The calls use the credentials of `main_url` (the same account as RTSP) and go to
 A rule with `clip: true` makes a clip when its event ends: the recorded `.ts` segments from `clips.pre_seconds` before the event started to `clips.post_seconds` after it ended (capped at `clips.max_duration` seconds) are joined without re-encoding and remuxed to `<output_dir>/<camera>/clips/<event_id>.mp4`. If the MP4 remux fails (some camera streams do not survive it), the joined `.ts` is kept and played through the HLS player instead. The job waits until `post_seconds` (plus two seconds) have passed after the end, so the last segment is complete. The camera must record (`record.enabled: true`); notifications go out when the event opens, so they never carry a clip link. The event's page plays the clip.
 
 ## Upgrading from 1.3
+
+**1.4** adds, all optional and backwards compatible: a per-detector `when` and, for `onnx` detectors, `classes`; a day/night state per camera (`night` in status and in new events' metadata; older events show no badge); two Detection-panel routes (`.../detectors/{index}/when`, `.../classes`); and the `tools/wildlife/` training tool for the `wildlife-yolox-s` model. No schema change. The 1.3 notes below still apply when coming from 1.2.
 
 - **Python 3.11 or newer** is required (ONNX Runtime ships no Python 3.10 builds).
 - **Database:** `serve` upgrades the schema when it starts. A SQLite database is first copied next to itself as `<file>.bak-<old revision>` (for example `warden.db.bak-0002_clips`); to go back to 1.3, stop rtsp-warden and put that copy back. A PostgreSQL database cannot be copied that way, so `serve` refuses to upgrade it and says so: take a backup (`pg_dump`), then start once with `WARDEN_DB_UPGRADE=1` in the environment. A database written by a newer release is refused with a message and left untouched. Existing events keep their data and get their camera name from the old event text; the never-used `cameras`, `recordings` and `ingest_health` tables and the `clips` table are dropped.
