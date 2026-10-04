@@ -17,16 +17,18 @@ flag with the brightness floor. The owner's verdict on RW-5: "seems great".
   (`camera`, `label`, `from`, `to`) and deletes what they match, all events with none, behind a browser confirm
   ("Delete N events" under the filters). Viewers see no controls and get 403. Tests in `tests/test_events_ui.py`.
 - **Screenshots**: `tools/screenshots.py` (Playwright on the system Chromium, credentials from env, LAN IPs in
-  page text replaced by `camera.lan`) and `docs/screenshots/*.png` referenced from a README "Screenshots" section.
-  Captured so far: camera, camera-settings, detection-classes, health, actions. **Not captured**: dashboard and
-  events, because both show the owner's 67 existing test events (bottle / microwave / oven / person thumbnails of
-  their room) and the owner does not want those public. A temporary admin user `screenshots` was created in the
-  live DB for the captures and removed again afterwards.
+  page text replaced by `camera.lan`) and `docs/screenshots/*.png` (dashboard, events, camera, camera-settings,
+  detection-classes, health, actions) referenced from a README "Screenshots" section.
 
-**Waiting on the owner.** Whether to clear the 67 existing events (one click on "Delete 67 events" on /events, or
-say so and the agent does it), after which the dashboard and events screenshots can be taken and added. Then the
-usual: watch the first real cat / fox / raccoon events; optional Roboflow set + retrain; release asset + built-in
-descriptor; relabel button (RW-6 candidate).
+**Owner's clearing, done live.** On the owner's word the 67 test events were deleted through the real Events page in a
+headless browser ("Delete 67 events" → confirm → flash "Deleted 67 events"; 67 thumbnails gone, 0 action_runs left),
+then one "Fire test event" (placeholder picture, nothing personal) gave the dashboard and events screenshots a card to
+show, and the card's own Delete button removed it again (per-event route verified live). `docs/screenshots/` now has
+all seven pages; the README Screenshots section and its Events paragraph document the deletion. The temporary
+`screenshots` admin was removed again; only `admin` is in the users table. The live events table is empty.
+
+**Next.** The owner's: watch the first real cat / fox / raccoon events (the camera points at the floor right now);
+optional Roboflow set + retrain; release asset + built-in descriptor; relabel button (RW-6 candidate).
 
 ## 2026-10-04 (morning) — START HERE: RW-5 done; wildlife-yolox-s trained, exported and running in the live stack
 

@@ -20,10 +20,12 @@ A self-hosted Network Video Recorder (NVR) for RTSP cameras. Records continuousl
 
 ## Screenshots
 
-Taken with `tools/screenshots.py` against a single Foscam C1 on a GPU host (the camera was pointed at the floor).
+Taken with `tools/screenshots.py` against a single Foscam C1 on a GPU host (the camera was pointed at the floor; the event shown is the synthetic "Fire test event").
 
 | | |
 |---|---|
+| **Dashboard**: cameras with their state and GPU badge, recent events | **Events**: filters, the admin's "Delete N events" for whatever they match, one card per object visit with its own Delete button |
+| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) | [![Events](docs/screenshots/events.png)](docs/screenshots/events.png) |
 | **Camera page**: live preview, status, detection settings, both detectors (`yolox-s` for people and vehicles, `wildlife-yolox-s` for animals) with their `when` and `classes`, zones, rules, retention | **Camera settings** over the camera's own HTTP API: stream profiles, image tuning, infrared, on-screen text |
 | [![Camera page](docs/screenshots/camera.png)](docs/screenshots/camera.png) | [![Camera settings](docs/screenshots/camera-settings.png)](docs/screenshots/camera-settings.png) |
 | **Detection classes**: the labels of every model on the camera, grouped | **Health**, **Actions** |
@@ -532,6 +534,8 @@ onnx detector onnx (model yolox-s, device auto) provider: CUDAExecutionProvider
 ### Events
 
 Boxes from object detectors are matched across frames by a per-camera tracker (intersection over union, per label). A track that is matched on `min_track_frames` frames in a row (default 2) becomes one row in the `events` table: camera, label, best confidence, zone, and a JPEG thumbnail with its box drawn (`<output_dir>/<camera>/thumbnails/<event_id>.jpg`). The thumbnail is cut from the full-size preview stream (the frame nearest the best detection, with the box scaled onto it) when the camera has an MJPEG proxy; otherwise, or when no such frame is at hand, it is the smaller frame the detector saw. While the object stays in view, the row and thumbnail are updated when a better frame arrives (at most once per second); a full-size thumbnail is never replaced by a smaller one. Once the tracker has not seen the object for `track_grace_seconds` (default 3), the event gets its end time. Two people walking past are two events; a person standing still for ten minutes is one.
+
+An admin can delete events: each card and the detail page have a Delete button that removes the row, its action runs, thumbnail and clip, and the Events page has a "Delete N events" button for whatever the current filters match (all events with no filter), behind a confirmation. Viewers never see these controls.
 
 **Stationary objects.** A track whose box still overlaps the box it was first seen at by at least `stationary_iou` (default 0.6) has not moved, so it makes no event: a parked car, a chair, or a dark shape the model mistakes for a microwave every time the light changes. It is held instead, and opens as an event the moment its box drifts away from where it started (the event then starts at that frame). A camera restart or the lights coming on therefore no longer makes an event out of everything in view. `stationary_iou: 0` turns the check off. The Detection panel edits the value and shows how many objects were held back.
 
