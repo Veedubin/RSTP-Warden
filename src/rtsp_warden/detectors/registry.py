@@ -57,6 +57,7 @@ class DetectorSpec(BaseModel):
     model: str | None = None  # onnx: model registry name; None = "yolox-s"
     device: DetectorDevice = "auto"  # onnx: execution provider choice
     when: DetectorWhen = "always"  # run always, by day only, or at night only (RW-5)
+    classes: list[str] | None = None  # onnx: labels this slot may report (None = all; RW-5)
     events: bool | None = None  # motion: write events; None = CameraConfig decides
     config: dict[str, Any] = Field(default_factory=dict)
     # Type-specific fields (optional, only used by some types)
@@ -119,6 +120,12 @@ class DetectorSpec(BaseModel):
         if converted:
             spec._fps_from_interval = True
         return spec
+
+    @model_validator(mode="after")
+    def _classes_only_for_onnx(self) -> DetectorSpec:
+        if self.classes is not None and self.type != "onnx":
+            raise ValueError("classes is only valid for type: onnx")
+        return self
 
     @field_validator("type")
     @classmethod
@@ -265,7 +272,8 @@ def _build_onnx_detector(
         if spec.min_confidence is not None
         else apply_sensitivity_to_confidence(camera_sensitivity)
     )
-    classes = list(camera_detect_classes) if camera_detect_classes is not None else None
+    # The slot's own classes, narrowed by the camera's detect_classes (either alone applies).
+    classes = effective_classes(camera_detect_classes, spec.classes)
     return OnnxDetector(
         descriptor=descriptor,
         models_dir=resolved_dir,
@@ -574,6 +582,42 @@ def build_area_masks_from_config(
     return [(zc.name, GridMask.from_zone(zc)) for zc in zones if zc.enabled and zc.kind == "area"]
 
 
+def _reported_labels(det: Detector) -> list[str]:
+    """Labels an onnx detector may report: its class filter, else every label of its model."""
+    classes = getattr(det, "classes", None)
+    if classes is not None:
+        return list(classes)
+    descriptor = getattr(det, "descriptor", None)
+    if descriptor is None:
+        return []
+    from .model_registry import load_labels
+
+    try:
+        return list(load_labels(descriptor))
+    except Exception:
+        return []
+
+
+def _warn_overlapping_labels(camera_name: str, slots: list[DetectorSlot]) -> None:
+    """Warn when two onnx slots may report the same label (one object, two tracks, two events)."""
+    first_slot: dict[str, int] = {}
+    for slot in slots:
+        if slot.spec.type != "onnx":
+            continue
+        for label in _reported_labels(slot.detector):
+            if label in first_slot:
+                logger.warning(
+                    "camera %s: detectors %d and %d both report %r; one object may open two "
+                    "events (set classes on one of them)",
+                    camera_name,
+                    first_slot[label],
+                    slot.index,
+                    label,
+                )
+            else:
+                first_slot[label] = slot.index
+
+
 def build_detectors_for_camera(
     camera_cfg: CameraConfig,
     base_specs: list[DetectorSpec],
@@ -626,6 +670,8 @@ def build_detectors_for_camera(
 
     if not detectors:
         return CameraDetectorBundle()
+
+    _warn_overlapping_labels(camera_cfg.name, slots)
 
     # Build ROI and masks from specs.
     runner_roi: ROI | None = None

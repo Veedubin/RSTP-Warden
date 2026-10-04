@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from rtsp_warden.config import AppConfig, CameraConfig, RuntimeConfig, load_config
+from rtsp_warden.config import AppConfig, CameraConfig, DetectorSpec, RuntimeConfig, load_config
 from rtsp_warden.detectors.model_registry import (
     ModelNotFound,
     camera_label_universe,
@@ -250,3 +250,40 @@ def test_camera_label_universe_unknown_model_raises(tmp_path: Path) -> None:
     c = CameraConfig.model_validate(cam(detectors=[{"type": "onnx", "model": "nope"}]))
     with pytest.raises(ModelNotFound):
         camera_label_universe(c, tmp_path)
+
+
+# --- RW-5: per-slot classes -----------------------------------------------------------------------
+
+
+def test_onnx_classes_are_validated_against_that_model(default_models: Path) -> None:
+    write_model(default_models, "yolox-s", ["person", "car", "cat"])
+    write_model(default_models, "wild", ["cat", "fox", "raccoon"])
+    ok = AppConfig.model_validate(
+        app(
+            cam(
+                detectors=[
+                    {"type": "onnx", "model": "yolox-s", "classes": ["person"]},
+                    {"type": "onnx", "model": "wild", "classes": ["fox", "raccoon"]},
+                ]
+            )
+        )
+    )
+    assert ok.cameras[0].detectors[1].classes == ["fox", "raccoon"]
+    with pytest.raises(ValidationError) as exc:
+        AppConfig.model_validate(
+            app(
+                cam(
+                    detectors=[
+                        {"type": "onnx", "model": "yolox-s", "classes": ["fox"]},
+                        {"type": "onnx", "model": "wild"},
+                    ]
+                )
+            )
+        )
+    text = str(exc.value)
+    assert "detectors[0] classes" in text and "fox" in text and "yolox-s" in text
+
+
+def test_classes_on_a_non_onnx_detector_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="classes is only valid for type: onnx"):
+        DetectorSpec(type="motion", classes=["person"])

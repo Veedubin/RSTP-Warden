@@ -19,6 +19,7 @@ from pydantic import (
 
 from .deprecations import warn_once as _warn_once
 from .detectors.model_registry import (
+    DEFAULT_MODEL,
     ModelError,
     camera_model_labels,
     default_models_dir,
@@ -1155,6 +1156,21 @@ class AppConfig(BaseModel):
             if not per_model:
                 continue
             universe = {label for labels in per_model.values() for label in labels}
+            for index, spec in enumerate(cam.detectors):
+                if spec.type != "onnx" or spec.classes is None:
+                    continue
+                model_name = spec.model or DEFAULT_MODEL
+                labels = per_model.get(model_name, [])
+                unknown = [c for c in spec.classes if c not in labels]
+                if unknown:
+                    raise ValueError(
+                        unknown_labels_message(
+                            cam.name,
+                            f"detectors[{index}] classes",
+                            unknown,
+                            {model_name: labels},
+                        )
+                    )
             if cam.detect_classes is not None:
                 unknown = [c for c in cam.detect_classes if c not in universe]
                 if unknown:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from rtsp_warden import app as app_module
@@ -152,3 +153,76 @@ def test_app_runtime_passes_runtime_models_dir(
     assert after_build >= 1
     assert len(seen) > after_build
     assert set(seen) == {tmp_path / "models"}
+
+
+# --- RW-5: per-slot classes -----------------------------------------------------------------------
+
+URL = "rtsp://u:p@h/m"
+
+
+def _labelled_model(models_dir: Path, name: str, labels: list[str]) -> None:
+    write_model_dir(models_dir, yolox_output(INPUT, len(labels), {}), name=name, labels=labels)
+
+
+def test_spec_classes_intersect_with_camera_detect_classes(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    _labelled_model(models, "wild", ["cat", "fox", "raccoon", "person"])
+    cam = CameraConfig(
+        name="yard",
+        main_url=URL,
+        detect_classes=["fox", "person", "car"],
+        detectors=[DetectorSpec(type="onnx", model="wild", classes=["cat", "fox", "raccoon"])],
+    )
+    bundle = build_detectors_for_camera(cam, cam.detectors, models_dir=models)
+    assert bundle.detectors[0].classes == ["fox"]
+
+
+def test_spec_classes_alone_filter_the_model(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    _labelled_model(models, "wild", ["cat", "fox", "raccoon", "person"])
+    cam = CameraConfig(
+        name="yard",
+        main_url=URL,
+        detectors=[DetectorSpec(type="onnx", model="wild", classes=["raccoon"])],
+    )
+    bundle = build_detectors_for_camera(cam, cam.detectors, models_dir=models)
+    assert bundle.detectors[0].classes == ["raccoon"]
+
+
+def test_empty_intersection_builds_a_silent_detector(tmp_path: Path) -> None:
+    """(review focus) Nothing in common means "report nothing", never a startup error."""
+    models = tmp_path / "models"
+    _labelled_model(models, "wild", ["cat", "fox"])
+    cam = CameraConfig(
+        name="yard",
+        main_url=URL,
+        detect_classes=["person"],
+        detectors=[DetectorSpec(type="onnx", model="wild", classes=["fox"])],
+    )
+    bundle = build_detectors_for_camera(cam, cam.detectors, models_dir=models)
+    det = bundle.detectors[0]
+    assert isinstance(det, OnnxDetector) and det.classes == []
+    det.setup()
+    assert det.process(np.zeros((64, 64, 3), dtype=np.uint8), 1.0) == []
+
+
+def test_overlapping_classes_load_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """(review focus) Two models allowed to report one label are accepted, with a warning."""
+    models = tmp_path / "models"
+    _labelled_model(models, "a", ["dog", "cat"])
+    _labelled_model(models, "b", ["dog", "fox"])
+    cam = CameraConfig(
+        name="yard",
+        main_url=URL,
+        detectors=[
+            DetectorSpec(type="onnx", model="a", classes=["dog"]),
+            DetectorSpec(type="onnx", model="b"),
+        ],
+    )
+    with caplog.at_level("WARNING", logger="rtsp_warden.detectors.registry"):
+        bundle = build_detectors_for_camera(cam, cam.detectors, models_dir=models)
+    assert len(bundle.detectors) == 2
+    assert "both report 'dog'" in caplog.text
+    assert "'fox'" not in caplog.text
