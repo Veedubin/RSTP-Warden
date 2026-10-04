@@ -87,14 +87,17 @@ OPEN_IMAGES_MIDS: dict[str, str] = {
 
 
 def filter_open_images_rows(
-    rows: Iterable[dict[str, str]], cap_per_class: int
+    rows: Iterable[dict[str, str]],
+    cap_per_class: int,
+    only_labels: set[str] | None = None,
 ) -> dict[str, list[dict]]:
     """Boxes of wanted classes grouped by image id, at most ``cap_per_class`` images per label.
 
     Rows with ``IsGroupOf`` or ``IsDepiction`` set are skipped (crowds and drawings). The
     first ``cap_per_class`` images seen per label are kept; every wanted box of a kept image
-    is kept, even one that arrives after its label hit the cap. Boxes stay normalized
-    (``xmin, xmax, ymin, ymax`` in 0..1) until the image size is known.
+    is kept, even one that arrives after its label hit the cap. With ``only_labels`` an image
+    is only *admitted* for one of those labels (its other wanted boxes still come along).
+    Boxes stay normalized (``xmin, xmax, ymin, ymax`` in 0..1) until the image size is known.
     """
     kept_images: dict[str, set[str]] = {label: set() for label in OPEN_IMAGES_MIDS.values()}
     out: dict[str, list[dict]] = {}
@@ -112,6 +115,8 @@ def filter_open_images_rows(
         }
         if image_id in out:
             out[image_id].append(box)
+            continue
+        if only_labels is not None and label not in only_labels:
             continue
         if len(kept_images[label]) >= cap_per_class:
             continue

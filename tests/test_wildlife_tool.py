@@ -227,3 +227,16 @@ def test_build_records_reads_voc_xml_and_skips_unknown_roboflow_labels(tmp_path:
     assert records[0]["file"] == tmp_path / "raccoon_dataset-master" / "images" / "r1.jpg"
     assert records[0]["boxes"] == [("raccoon", [10.0, 20.0, 100.0, 200.0])]
     assert records[1]["boxes"] == [("raccoon", [1.0, 2.0, 3.0, 4.0])]  # "cat-raccoons" dropped
+
+
+def test_open_images_filter_can_be_restricted_to_some_labels() -> None:
+    cat, fox = "/m/01yrx", "/m/0306r"
+
+    def row(img: str, mid: str) -> dict[str, str]:
+        return {"ImageID": img, "LabelName": mid, "XMin": "0", "XMax": "1", "YMin": "0",
+                "YMax": "1", "IsGroupOf": "0", "IsDepiction": "0"}  # fmt: skip
+
+    rows = [row("a", cat), row("b", fox), row("b", cat)]
+    out = wd.filter_open_images_rows(rows, cap_per_class=10, only_labels={"fox"})
+    assert sorted(out) == ["b"]
+    assert [b["label"] for b in out["b"]] == ["fox", "cat"]  # a kept image keeps all its boxes

@@ -28,6 +28,18 @@ ENA24_IMAGES_URL = "https://storage.googleapis.com/public-datasets-lila/ena24/en
 ENA24_JSON_URL = "https://storage.googleapis.com/public-datasets-lila/ena24/ena24.json"
 OI_BOXES_CSV_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
 OI_IMAGE_URL = "https://open-images-dataset.s3.amazonaws.com/train/{image_id}.jpg"
+# The much smaller validation and test splits add images of the rare labels only.
+OI_EXTRA_SPLITS: dict[str, tuple[str, str]] = {
+    "validation": (
+        "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv",
+        "https://open-images-dataset.s3.amazonaws.com/validation/{image_id}.jpg",
+    ),
+    "test": (
+        "https://storage.googleapis.com/openimages/v5/test-annotations-bbox.csv",
+        "https://open-images-dataset.s3.amazonaws.com/test/{image_id}.jpg",
+    ),
+}
+OI_RARE_LABELS = frozenset({"fox", "raccoon", "skunk"})
 RACCOON_ZIP_URL = "https://github.com/datitran/raccoon_dataset/archive/refs/heads/master.zip"
 
 
@@ -84,31 +96,24 @@ def fetch_ena24() -> None:
     print(f"ena24: {sum(1 for _ in images.glob('*.jpg'))} images in {images}")
 
 
-def fetch_openimages(cap: int, workers: int) -> None:
-    """Filter the 2.3 GB box CSV once (boxes.json), then fetch the kept images in parallel."""
+def _filter_csv(csv_path: Path, cap: int, only_labels: frozenset[str] | None) -> dict:
+    print(f"open images: filtering {csv_path.name}")
+    with csv_path.open(newline="", encoding="utf-8") as fh:
+        return filter_open_images_rows(
+            csv.DictReader(fh), cap_per_class=cap, only_labels=only_labels
+        )
+
+
+def _download_images(boxes: dict, image_url: str, images: Path, workers: int, what: str) -> None:
     import httpx
 
-    out = RAW / "openimages"
-    boxes_path = out / "boxes.json"
-    if not boxes_path.exists():
-        csv_path = download(
-            OI_BOXES_CSV_URL,
-            out / "oidv6-train-annotations-bbox.csv",
-            desc="open images boxes csv (2.3 GB)",
-        )
-        print("open images: filtering the box csv (a few minutes)")
-        with csv_path.open(newline="", encoding="utf-8") as fh:
-            boxes = filter_open_images_rows(csv.DictReader(fh), cap_per_class=cap)
-        boxes_path.write_text(json.dumps(boxes), encoding="utf-8")
-    boxes = json.loads(boxes_path.read_text(encoding="utf-8"))
-    images = out / "images"
     images.mkdir(parents=True, exist_ok=True)
     todo = [i for i in boxes if not (images / f"{i}.jpg").exists()]
-    print(f"open images: {len(boxes)} images kept, {len(todo)} to download")
+    print(f"{what}: {len(boxes)} images kept, {len(todo)} to download")
     failed = 0
 
     def one(client: httpx.Client, image_id: str) -> bool:
-        r = client.get(OI_IMAGE_URL.format(image_id=image_id))
+        r = client.get(image_url.format(image_id=image_id))
         if r.status_code != 200:
             return False
         tmp = images / f"{image_id}.jpg.part"
@@ -125,7 +130,42 @@ def fetch_openimages(cap: int, workers: int) -> None:
             if not fut.result():
                 failed += 1
             if n % 500 == 0 or n == len(futures):
-                print(f"open images: {n}/{len(futures)} done, {failed} failed")
+                print(f"{what}: {n}/{len(futures)} done, {failed} failed")
+
+
+def fetch_openimages(cap: int, workers: int) -> None:
+    """Filter the box CSVs once (boxes.json per split), then fetch the kept images in parallel.
+
+    The train split gives every wanted label up to ``cap`` images; the small validation and
+    test splits only add images of the rare labels (fox, raccoon, skunk). Image ids are
+    unique across splits, so one images/ directory holds them all and prepare.py reads
+    every ``boxes*.json``.
+    """
+    out = RAW / "openimages"
+    images = out / "images"
+    boxes_path = out / "boxes.json"
+    if not boxes_path.exists():
+        csv_path = download(
+            OI_BOXES_CSV_URL,
+            out / "oidv6-train-annotations-bbox.csv",
+            desc="open images boxes csv (2.3 GB)",
+        )
+        boxes_path.write_text(json.dumps(_filter_csv(csv_path, cap, None)), encoding="utf-8")
+    _download_images(
+        json.loads(boxes_path.read_text(encoding="utf-8")), OI_IMAGE_URL, images, workers,
+        "open images (train)",
+    )  # fmt: skip
+    for split, (csv_url, image_url) in OI_EXTRA_SPLITS.items():
+        split_boxes = out / f"boxes-{split}.json"
+        if not split_boxes.exists():
+            csv_path = download(csv_url, out / f"{split}-annotations-bbox.csv")
+            split_boxes.write_text(
+                json.dumps(_filter_csv(csv_path, cap, OI_RARE_LABELS)), encoding="utf-8"
+            )
+        _download_images(
+            json.loads(split_boxes.read_text(encoding="utf-8")), image_url, images, workers,
+            f"open images ({split})",
+        )  # fmt: skip
 
 
 def fetch_raccoon() -> None:

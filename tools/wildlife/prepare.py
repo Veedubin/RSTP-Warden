@@ -216,10 +216,9 @@ def main() -> None:
     args = ap.parse_args()
 
     ena_json = json.loads((RAW / "ena24" / "ena24.json").read_text(encoding="utf-8"))
-    oi_boxes_path = RAW / "openimages" / "boxes.json"
-    oi_boxes = (
-        json.loads(oi_boxes_path.read_text(encoding="utf-8")) if oi_boxes_path.exists() else {}
-    )
+    oi_boxes: dict[str, list[dict]] = {}
+    for boxes_path in sorted((RAW / "openimages").glob("boxes*.json")):
+        oi_boxes.update(json.loads(boxes_path.read_text(encoding="utf-8")))
     oi_images = RAW / "openimages" / "images"
     oi_sizes: dict[str, tuple[int, int]] = {}
     for image_id in oi_boxes:
@@ -263,9 +262,8 @@ def main() -> None:
         (COCO / "annotations" / f"{split}.json").write_text(json.dumps(coco), encoding="utf-8")
         counts = Counter(LABELS[a["category_id"] - 1] for a in coco["annotations"])
         sources = Counter(i["source"] for i in coco["images"])
-        print(
-            f"{split}: {len(coco['images'])} images {dict(sources)}, {len(coco['annotations'])} boxes"
-        )
+        n_images, n_boxes = len(coco["images"]), len(coco["annotations"])
+        print(f"{split}: {n_images} images {dict(sources)}, {n_boxes} boxes")
         for label in LABELS:
             print(f"  {counts.get(label, 0):6d}  {label}")
     print(f"val grayscale images: {sum(gray.values())} of {len(gray)}")
