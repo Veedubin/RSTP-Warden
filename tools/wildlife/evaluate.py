@@ -34,7 +34,9 @@ def detect_all(ckpt: Path, conf: float, nms: float) -> tuple[COCO, list[dict]]:
     exp = Exp()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = exp.get_model().to(device).eval()
-    model.load_state_dict(torch.load(ckpt, map_location=device)["model"])
+    # Our own checkpoint (YOLOX stores a numpy scalar in it), so weights_only=False is safe.
+    state = torch.load(ckpt, map_location=device, weights_only=False)
+    model.load_state_dict(state["model"])
     coco = COCO(str(Path(exp.data_dir) / "annotations" / exp.val_ann))
     cat_ids = sorted(coco.getCatIds())
     transform = ValTransform(legacy=False)

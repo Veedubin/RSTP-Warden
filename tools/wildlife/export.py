@@ -69,7 +69,9 @@ def main() -> None:
     exp = Exp()
     assert tuple(exp.test_size) == INPUT_SIZE
     model = exp.get_model().eval()
-    model.load_state_dict(torch.load(args.ckpt, map_location="cpu")["model"])
+    # Our own checkpoint (YOLOX stores a numpy scalar in it), so weights_only=False is safe.
+    state = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    model.load_state_dict(state["model"])
     model.head.decode_in_inference = False  # raw grid rows: rtsp-warden's decode_yolox decodes
     dummy = torch.randn(1, 3, *INPUT_SIZE)
     onnx_path = args.out / ONNX_NAME
