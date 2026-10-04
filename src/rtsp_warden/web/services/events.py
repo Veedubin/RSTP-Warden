@@ -20,6 +20,7 @@ request input.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -32,6 +33,8 @@ from ...config import AppConfig
 from ...db.engine import get_session
 from ...db.models import Event
 from ...db.schema import as_utc, list_action_runs
+
+log = logging.getLogger(__name__)
 
 PAGE_SIZE = 24
 TEST_EVENT_TYPE = "test"
@@ -145,6 +148,25 @@ def resolve_media_path(
         if candidate.is_relative_to(root_resolved) and candidate.is_file():
             return candidate
     return None
+
+
+def remove_event_files(cfg: AppConfig | None, row: Event) -> int:
+    """Delete a (deleted) event's thumbnail and clip files; returns how many were removed.
+
+    Paths resolve through :func:`resolve_media_path`, so nothing outside a configured
+    ``record.output_dir`` is ever touched; a missing file is not an error.
+    """
+    removed = 0
+    for stored in (row.thumbnail_path, row.clip_path):
+        path = resolve_media_path(cfg, row.camera_name, stored)
+        if path is None:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            log.warning("event %s: could not remove %s", row.id, path, exc_info=True)
+    return removed
 
 
 def _media_state(cfg: AppConfig | None, camera_name: str | None, stored: str | None) -> MediaState:

@@ -6,6 +6,15 @@
   <h1>{{ event.label }}{% if event.confidence_pct is not none %} {{ event.confidence_pct }}%{% endif %}{% if event.is_test %} <span class="event-badge">test</span>{% endif %}{% if event.night %} <span class="event-badge">night</span>{% endif %}</h1>
   <p>{{ event.camera_name }}{% if event.zone %} &middot; {{ event.zone }}{% endif %} &middot; {{ event.started_display }}</p>
 </hgroup>
+{% set cu = request.state.current_user if request.state.current_user else none %}
+{% if cu and cu.role == 'admin' %}
+<form class="event-delete" method="POST" action="/events/{{ event.id }}/delete"
+      onsubmit="return confirm('Delete this event and its thumbnail and clip?')">
+  <input type="hidden" name="csrf_token"
+         value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+  <button type="submit" class="outline secondary">Delete event</button>
+</form>
+{% endif %}
 
 <article>
   {% if event.thumbnail_url %}

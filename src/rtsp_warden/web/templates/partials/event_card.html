@@ -21,5 +21,18 @@
     </p>
     <small class="event-meta">{{ evt.camera_name }}{% if evt.zone %} &middot; {{ evt.zone }}{% endif %}</small>
     <small class="event-meta"><time datetime="{{ evt.started_iso }}">{{ evt.started_display }}</time></small>
+    {% set cu = request.state.current_user if request.state.current_user else none %}
+    {% if cu and cu.role == 'admin' %}
+    <form class="event-delete" method="POST" action="/events/{{ evt.id }}/delete"
+          hx-post="/events/{{ evt.id }}/delete"
+          hx-target="closest .event-card"
+          hx-swap="outerHTML"
+          hx-confirm="Delete this {{ evt.label }} event and its thumbnail and clip?">
+      <input type="hidden" name="csrf_token"
+             value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+      <button type="submit" class="outline secondary event-delete-button"
+              aria-label="Delete event {{ evt.id }}">Delete</button>
+    </form>
+    {% endif %}
   </div>
 </article>

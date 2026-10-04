@@ -14,11 +14,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from ... import __version__
 from ...config import AppConfig, ClipsConfig
-from ..auth_depends import require_user
+from ...db.schema import delete_event, delete_events
+from ..auth_depends import require_admin, require_user
 from ..services.events import (
     PAGE_SIZE,
     clip_playlist,
@@ -29,8 +30,9 @@ from ..services.events import (
     list_event_action_runs,
     list_events,
     parse_date_range,
+    remove_event_files,
 )
-from ._common import templates
+from ._common import is_htmx, set_flash, templates
 
 router = APIRouter(prefix="/events")
 
@@ -127,6 +129,55 @@ def events_partial(
     """Return only the card grid (the inner HTML of ``#event-grid``) for the htmx refresh."""
     context = _grid_context(request, camera, label, date_from, date_to, page)
     return templates.TemplateResponse(request, "events/_grid.html", context)
+
+
+@router.post("/delete", response_model=None)
+async def events_delete_matching(request: Request, user=Depends(require_admin)) -> Response:
+    """Delete every event matching the form's filters (camera, label, from, to); admin-only.
+
+    With no filters it empties the events table. Thumbnails and clips of the deleted
+    events are removed from disk. Redirects back to the filtered list with a flash.
+    """
+    form = await request.form()
+    filters = {
+        "camera": _clean(str(form.get("camera", ""))),
+        "label": _clean(str(form.get("label", ""))),
+        "from": _clean(str(form.get("from", ""))),
+        "to": _clean(str(form.get("to", ""))),
+    }
+    since, until = parse_date_range(filters["from"], filters["to"])
+    rows = delete_events(
+        camera_name=filters["camera"], label=filters["label"], since=since, until=until
+    )
+    cfg = _cfg(request)
+    for row in rows:
+        remove_event_files(cfg, row)
+    response = RedirectResponse(url=_events_url("/events", filters), status_code=303)
+    count = len(rows)
+    set_flash(response, f"Deleted {count} event{'' if count == 1 else 's'}", "success")
+    return response
+
+
+@router.post("/{event_id}/delete", response_model=None)
+def event_delete(request: Request, event_id: int, user=Depends(require_admin)) -> Response:
+    """Delete one event, its action runs and its files; admin-only.
+
+    An htmx request gets an empty 200 (the card swaps itself away); a plain form post is
+    redirected to the events list with a flash.
+    """
+    row = delete_event(event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+    remove_event_files(_cfg(request), row)
+    if is_htmx(request):
+        return Response(status_code=200)
+    response = RedirectResponse(url="/events", status_code=303)
+    set_flash(
+        response,
+        f"Deleted event {row.id} ({row.label or row.event_type} on {row.camera_name})",
+        "success",
+    )
+    return response
 
 
 @router.get("/{event_id}", response_class=HTMLResponse)

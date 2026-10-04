@@ -524,3 +524,16 @@ main code,
 .detection-badge-warn { color: #b26a00; }
 .detection-badge-error { color: #c62828; }
 .detection-dropped { margin-left: 0.4rem; color: var(--pico-muted-color, #777); }
+
+/* Admin-only event deletion (RW-5 follow-up): a compact button on the card, a row under the filters. */
+.event-delete {
+  margin: 0.4rem 0 0;
+}
+.event-delete-button {
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  width: auto;
+}
+.event-delete-all {
+  margin-top: 0.75rem;
+}

@@ -15,8 +15,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rtsp_warden import __version__
+from rtsp_warden.auth import hash_password
 from rtsp_warden.config import AppConfig, CameraConfig, RecordConfig
-from rtsp_warden.db.schema import insert_action_run, insert_event, update_event
+from rtsp_warden.db.schema import (
+    create_user,
+    get_event,
+    insert_action_run,
+    insert_event,
+    list_action_runs,
+    update_event,
+)
 from rtsp_warden.web.app import create_app
 from rtsp_warden.web.config import WebSettings
 from rtsp_warden.web.paths import STATIC_DIR, TEMPLATES_DIR
@@ -376,7 +384,7 @@ def test_events_partial_returns_only_the_filtered_grid(client: TestClient, rec_d
     assert f'id="event-card-{back}"' in r.text
     assert f'id="event-card-{front}"' not in r.text
     assert "<html" not in r.text
-    assert "<form" not in r.text
+    assert 'class="filter-form"' not in r.text  # the grid only, not the filter form
 
 
 def test_events_page_refreshes_page_one_with_its_filters(client: TestClient, rec_dir: Path) -> None:
@@ -637,3 +645,137 @@ def test_event_dict_reads_the_night_flag(clean_db: None, cfg: AppConfig) -> None
     assert svc.get_event_by_id(odd_id, cfg)["night"] is None
     rows, _total = svc.list_events(cfg=cfg)
     assert {r["id"]: r["night"] for r in rows} == {night_id: True, day_id: False, odd_id: None}
+
+
+# --------------------------------------------------------------------------- delete (admin only)
+
+
+def _csrf(c: TestClient) -> str:
+    return c.cookies.get("warden_csrf", "")
+
+
+def _viewer_client(cfg: AppConfig) -> TestClient:
+    create_user("viewer", hash_password("viewerpass1"), is_admin=False)
+    c = TestClient(create_app(WebSettings(), cfg=cfg, runtime_provider=lambda: None))
+    c.get("/login")
+    c.post(
+        "/login",
+        data={"username": "viewer", "password": "viewerpass1", "csrf_token": _csrf(c)},
+    )
+    return c
+
+
+def test_admin_deletes_one_event_with_its_files_and_runs(client: TestClient, rec_dir: Path) -> None:
+    event_id = _seed(rec_dir)
+    clip = _clip(rec_dir, event_id, ".mp4")
+    insert_action_run(event_id=event_id, action_name="phone", status="ok", error=None)
+    other = _seed(rec_dir, label="cat")
+    thumb = rec_dir / f"front/thumbnails/{event_id}.jpg"
+    assert thumb.exists() and clip.exists()
+
+    r = client.post(
+        f"/events/{event_id}/delete",
+        data={"csrf_token": _csrf(client)},
+        headers={"HX-Request": "true", "X-CSRF-Token": _csrf(client)},
+    )
+
+    assert r.status_code == 200 and r.text == ""
+    assert get_event(event_id) is None and get_event(other) is not None
+    assert not thumb.exists() and not clip.exists()
+    assert list_action_runs(event_id) == []
+    assert (rec_dir / f"front/thumbnails/{other}.jpg").exists()
+
+
+def test_delete_plain_form_redirects_to_events_with_a_flash(
+    client: TestClient, rec_dir: Path
+) -> None:
+    event_id = _seed(rec_dir)
+    r = client.post(
+        f"/events/{event_id}/delete", data={"csrf_token": _csrf(client)}, follow_redirects=False
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/events"
+    assert get_event(event_id) is None
+    r = client.get("/events")
+    assert f"Deleted event {event_id} (person on front)" in r.text
+
+
+def test_delete_unknown_event_is_404(client: TestClient) -> None:
+    r = client.post("/events/999999/delete", data={"csrf_token": _csrf(client)})
+    assert r.status_code == 404
+
+
+def test_viewer_cannot_delete_and_sees_no_delete_controls(
+    client: TestClient, cfg: AppConfig, rec_dir: Path
+) -> None:
+    event_id = _seed(rec_dir)
+    viewer = _viewer_client(cfg)
+    assert "/delete" not in viewer.get("/events").text
+    assert "/delete" not in viewer.get(f"/events/{event_id}").text
+    assert "/delete" not in viewer.get("/").text
+    r = viewer.post(
+        f"/events/{event_id}/delete",
+        data={"csrf_token": _csrf(viewer)},
+        headers={"X-CSRF-Token": _csrf(viewer)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403
+    r = viewer.post("/events/delete", data={"csrf_token": _csrf(viewer)}, follow_redirects=False)
+    assert r.status_code == 403
+    assert get_event(event_id) is not None
+
+
+def test_admin_sees_delete_controls_on_cards_detail_and_dashboard(
+    client: TestClient, rec_dir: Path
+) -> None:
+    event_id = _seed(rec_dir)
+    r = client.get("/events")
+    assert f'hx-post="/events/{event_id}/delete"' in r.text
+    assert 'action="/events/delete"' in r.text  # the bulk form
+    assert f'action="/events/{event_id}/delete"' in client.get(f"/events/{event_id}").text
+    assert f'hx-post="/events/{event_id}/delete"' in client.get("/").text
+
+
+def test_bulk_delete_honours_the_filters_and_reports_the_count(
+    client: TestClient, rec_dir: Path
+) -> None:
+    a = _seed(rec_dir, camera="front", label="person")
+    b = _seed(rec_dir, camera="front", label="cat")
+    c = _seed(rec_dir, camera="back", label="person")
+    _clip(rec_dir, a, ".ts")
+
+    r = client.post(
+        "/events/delete",
+        data={
+            "csrf_token": _csrf(client),
+            "camera": "front",
+            "label": "person",
+            "from": "",
+            "to": "",
+        },  # fmt: skip
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 303
+    assert r.headers["location"] == "/events?camera=front&label=person"
+    assert get_event(a) is None and get_event(b) is not None and get_event(c) is not None
+    assert not (rec_dir / f"front/thumbnails/{a}.jpg").exists()
+    assert not (rec_dir / f"front/clips/{a}.ts").exists()
+    assert (rec_dir / f"front/thumbnails/{b}.jpg").exists()
+    assert "Deleted 1 event" in client.get(r.headers["location"]).text
+
+    r = client.post("/events/delete", data={"csrf_token": _csrf(client)}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/events"
+    assert get_event(b) is None and get_event(c) is None
+    page = client.get("/events").text
+    assert "Deleted 2 events" in page
+    assert 'action="/events/delete"' not in page  # nothing left to delete
+
+
+def test_bulk_delete_with_no_match_says_so(client: TestClient) -> None:
+    r = client.post(
+        "/events/delete",
+        data={"csrf_token": _csrf(client), "camera": "ghost"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "Deleted 0 events" in client.get(r.headers["location"]).text

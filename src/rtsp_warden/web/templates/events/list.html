@@ -39,6 +39,18 @@
     <button type="submit" class="secondary">Filter</button>
     {% if filtered %}<a href="/events" role="button" class="secondary outline">Clear</a>{% endif %}
   </form>
+  {% set cu = request.state.current_user if request.state.current_user else none %}
+  {% if cu and cu.role == 'admin' and total %}
+  <form class="event-delete-all" method="POST" action="/events/delete"
+        onsubmit="return confirm('Delete {{ total }} event{{ '' if total == 1 else 's' }}{% if filtered %} matching the filters{% endif %}, with their thumbnails and clips?')">
+    <input type="hidden" name="csrf_token"
+           value="{{ request.state.csrf_token if request.state.csrf_token else '' }}">
+    {% for key in ('camera', 'label', 'from', 'to') %}
+    <input type="hidden" name="{{ key }}" value="{{ filters[key] or '' }}">
+    {% endfor %}
+    <button type="submit" class="outline secondary">Delete {{ total }} event{{ '' if total == 1 else 's' }}{% if filtered %} matching the filters{% endif %}</button>
+  </form>
+  {% endif %}
 </article>
 
 {# Only page 1 refreshes itself: on later pages new events would shift the cards. #}

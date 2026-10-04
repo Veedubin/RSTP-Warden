@@ -381,6 +381,54 @@ def get_event(event_id: int) -> Event | None:
         return event
 
 
+def delete_event(event_id: int) -> Event | None:
+    """Delete one event and its action runs; return the detached row, or None when absent.
+
+    The caller removes the thumbnail and clip files named by the returned row (the
+    database never knows the output directories). SQLite does not enforce the
+    ``ON DELETE CASCADE`` without a pragma, so the action runs go explicitly.
+    """
+    with get_session() as session:
+        event = session.get(Event, event_id)
+        if event is None:
+            return None
+        session.expunge(event)
+        session.query(ActionRun).filter(ActionRun.event_id == event_id).delete()
+        session.query(Event).filter(Event.id == event_id).delete()
+        session.commit()
+        return event
+
+
+_DELETE_CHUNK = 500
+
+
+def delete_events(
+    *,
+    camera_name: str | None = None,
+    label: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[Event]:
+    """Delete every event matching the filters (all of them with none); return the rows.
+
+    Same filter semantics as :func:`list_events`. Rows come back detached so the caller
+    can remove their files. Ids are deleted in chunks to stay under SQLite's variable limit.
+    """
+    with get_session() as session:
+        rows = _filter_events(session.query(Event), camera_name, label, since, until).all()
+        ids = [row.id for row in rows]
+        for row in rows:
+            session.expunge(row)
+        for start in range(0, len(ids), _DELETE_CHUNK):
+            chunk = ids[start : start + _DELETE_CHUNK]
+            session.query(ActionRun).filter(ActionRun.event_id.in_(chunk)).delete(
+                synchronize_session=False
+            )
+            session.query(Event).filter(Event.id.in_(chunk)).delete(synchronize_session=False)
+        session.commit()
+        return rows
+
+
 def _filter_events(
     query: Any,
     camera_name: str | None,

@@ -413,6 +413,8 @@ rtsp-warden [OPTIONS] COMMAND [ARGS]
 | `GET /events/{id}/thumbnail.jpg` | user | The event's thumbnail (404 once retention removed it) |
 | `GET /events/{id}/clip` | user | The event's clip: the MP4 file, or an HLS player for a `.ts` clip |
 | `GET /events/{id}/clip.m3u8` | user | One-entry HLS playlist for a `.ts` clip |
+| `POST /events/{id}/delete` | admin | Delete one event with its action runs, thumbnail and clip (the card's Delete button; htmx removes the card, a plain form returns to the list with a message) |
+| `POST /events/delete` | admin | Delete every event matching the form's `camera`, `label`, `from`, `to` filters, files included; with no filters, all events (the "Delete N events" button under the filters, with a confirmation) |
 | `GET /users` / `POST /users/new` | admin | User management |
 | `POST /users/{id}/reset-password` / `delete` / `toggle-admin` | admin | User actions |
 | `GET /api-tokens` / `POST` / `POST .../revoke` | user | API token management (bearer) |

@@ -51,6 +51,8 @@ RW3_ROUTES = (
     ("GET", "/events/{id}/thumbnail.jpg"),
     ("GET", "/events/{id}/clip"),
     ("GET", "/events/{id}/clip.m3u8"),
+    ("POST", "/events/{id}/delete"),
+    ("POST", "/events/delete"),
     ("GET", "/actions"),
     ("POST", "/actions/{name}/test"),
     ("GET", "/cameras/{name}/detection"),
