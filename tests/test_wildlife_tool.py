@@ -240,3 +240,19 @@ def test_open_images_filter_can_be_restricted_to_some_labels() -> None:
     out = wd.filter_open_images_rows(rows, cap_per_class=10, only_labels={"fox"})
     assert sorted(out) == ["b"]
     assert [b["label"] for b in out["b"]] == ["fox", "cat"]  # a kept image keeps all its boxes
+
+
+def test_export_writes_a_descriptor_the_registry_accepts(tmp_path: Path) -> None:
+    from rtsp_warden.detectors.model_registry import load_descriptor, load_labels
+
+    export = _load("export")
+    out = tmp_path / "wildlife-yolox-s"
+    out.mkdir()
+    (out / "wildlife_yolox_s.onnx").write_bytes(b"fake")
+    export.write_descriptor(out, "wildlife_yolox_s.onnx", "a" * 64)
+    desc = load_descriptor("wildlife-yolox-s", tmp_path)
+    assert desc.name == "wildlife-yolox-s"
+    assert desc.file == "wildlife_yolox_s.onnx" and desc.input_size == (640, 640)
+    assert desc.sha256 == "a" * 64 and desc.postprocess == "yolox"
+    assert desc.url is None
+    assert load_labels(desc) == list(wd.LABELS)
