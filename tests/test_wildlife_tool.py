@@ -37,6 +37,9 @@ def test_labels_match_the_shipped_file_and_the_spec_order() -> None:
     assert wd.label_id("raccoon") == 3
     assert [c["id"] for c in wd.COCO_CATEGORIES] == list(range(1, 19))
     assert wd.COCO_CATEGORIES[2]["name"] == "fox"
+    # people and cars are hard negatives from Open Images (ENA24's public zip has no humans)
+    assert wd.OPEN_IMAGES_MIDS["/m/01g317"] == "person"
+    assert wd.OPEN_IMAGES_MIDS["/m/0k4j"] == "vehicle"
 
 
 @pytest.mark.parametrize(

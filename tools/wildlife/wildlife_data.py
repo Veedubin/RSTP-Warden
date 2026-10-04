@@ -83,6 +83,11 @@ OPEN_IMAGES_MIDS: dict[str, str] = {
     "/m/071qp": "squirrel",
     "/m/06mf6": "rabbit",
     "/m/0bt9lr": "dog",
+    # Hard negatives: the public ENA24 zip leaves out its human images, so people and cars
+    # come from Open Images (the camera's yolox-s slot reports them; this model must not
+    # call a person a bear).
+    "/m/01g317": "person",
+    "/m/0k4j": "vehicle",
 }
 
 
