@@ -144,8 +144,10 @@ path, so the main test suite stays offline and torch-free.
 - `channel_spread(frame_bgr) -> float`: mean over a 4x-subsampled frame of
   `max(B,G,R) - min(B,G,R)`. A grayscale JPEG from the IR mode measures about 0–2 (chroma
   subsampling noise); a daytime colour frame tens. Default threshold `NIGHT_SPREAD = 4.0`.
-  Known limit: a very dark colour frame also measures low and counts as night, which is the
-  intended meaning ("IR or too dark for colour").
+  A frame with mean level below `NIGHT_BRIGHTNESS = 40.0` counts as night whatever its spread
+  (added after the first live frame: the Foscam with its IR LEDs off sends near-black frames whose
+  sensor noise is tinted, spread 8.6 at brightness 16). Status carries `night_spread` and
+  `night_brightness` so the thresholds can be judged on the real camera.
 - `DayNight(threshold=NIGHT_SPREAD, switch_frames=3)`: `update(frame_bgr, ts_unix) -> bool`.
   The first frame sets the state at once; afterwards the state flips only after
   `switch_frames` consecutive frames on the other side (no flapping at dusk). Fields:

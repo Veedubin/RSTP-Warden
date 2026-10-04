@@ -109,6 +109,8 @@ class DetectionStatus(TypedDict):
     night: bool | None  # IR / grayscale frames right now; None before the first frame
     night_since: float | None  # unix time of the last day/night change
     night_switches: int  # day/night changes since the runner started
+    night_spread: float | None  # last frame's mean channel spread (night when below 4)
+    night_brightness: float | None  # last frame's mean level (night when below 40)
 
 
 class CameraStatus(TypedDict, total=False):
@@ -405,6 +407,8 @@ def summarize_detection(raw: Any) -> DetectionStatus | None:
         "night": raw.get("night") if isinstance(raw.get("night"), bool) else None,
         "night_since": _as_float(raw.get("night_since")),
         "night_switches": _as_int(raw.get("night_switches")),
+        "night_spread": _as_float(raw.get("night_spread")),
+        "night_brightness": _as_float(raw.get("night_brightness")),
         "warnings": warnings,
         "detectors": detectors,
     }

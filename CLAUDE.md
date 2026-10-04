@@ -132,8 +132,10 @@ the camera has an MJPEG hub, never downgraded afterwards. `EventBuilder` itself 
 them. Status surfaces carry `stationary_held` / `stationary_suppressed`.
 
 RW-5 (2026-10-04) added the day/night state and two detector-spec fields. `detectors/daylight.py`:
-`channel_spread` (mean `max(B,G,R) - min(B,G,R)` over a 4x-subsampled frame) and `DayNight` (first frame sets
-the state, then `SWITCH_FRAMES = 3` consecutive frames on the other side of `NIGHT_SPREAD = 4.0` flip it). The
+`channel_spread` (mean `max(B,G,R) - min(B,G,R)` over a 4x-subsampled frame), `brightness` (mean level) and
+`DayNight` (night = spread below `NIGHT_SPREAD = 4.0` **or** brightness below `NIGHT_BRIGHTNESS = 40.0`; the first
+frame sets the state, then `SWITCH_FRAMES = 3` consecutive frames on the other side flip it; the brightness floor
+exists because the Foscam with its IR LEDs off sends tinted near-black frames with spread 8.6). The
 runner updates it on every decoded frame **before** `apply_masks` (masked pixels are black), sets
 `event_builder.night`, which lands in every event's metadata as `"night"`, and reports `night` / `night_since` /
 `night_switches` in its status. `DetectorSpec.when` (`always | day | night`) is checked with `daylight.allows`

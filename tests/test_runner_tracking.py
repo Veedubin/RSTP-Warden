@@ -736,6 +736,7 @@ def test_runner_tracks_night_state_and_reports_it() -> None:
     )
     st = runner.status()
     assert st["night"] is None and st["night_since"] is None and st["night_switches"] == 0
+    assert st["night_spread"] is None and st["night_brightness"] is None
     runner._process_job(_job(1.0))  # the black test JPEG is grayscale
     st = runner.status()
     assert st["night"] is True and st["night_since"] == 1.0 and st["night_switches"] == 0
@@ -746,6 +747,8 @@ def test_runner_tracks_night_state_and_reports_it() -> None:
     runner._process_job(_job_bytes(4.0, colour))
     st = runner.status()
     assert st["night"] is False and st["night_since"] == 4.0 and st["night_switches"] == 1
+    assert isinstance(st["night_spread"], float) and isinstance(st["night_brightness"], float)
+    assert st["night_spread"] > 4.0 and st["night_brightness"] > 40.0  # the red frame
     json.dumps(st)  # plain JSON types only
 
 

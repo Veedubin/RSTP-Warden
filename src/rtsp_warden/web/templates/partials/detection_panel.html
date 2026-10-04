@@ -57,6 +57,7 @@
     {{ status.get('frames_dropped', 0) }} dropped because detection fell behind
     {% if status.get('night') is not none %}
     &middot; night mode {{ 'on' if status.get('night') else 'off' }}
+    {% if status.get('night_spread') is not none %}(spread {{ '%.1f'|format(status.get('night_spread')) }}, brightness {{ '%.0f'|format(status.get('night_brightness') or 0) }}){% endif %}
     {% endif %}
     {% if status.get('stationary_suppressed') or status.get('stationary_held') %}
     &middot; {{ status.get('stationary_suppressed', 0) }} objects that never moved were held back

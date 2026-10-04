@@ -6,10 +6,12 @@ import numpy as np
 import pytest
 
 from rtsp_warden.detectors.daylight import (
+    NIGHT_BRIGHTNESS,
     NIGHT_SPREAD,
     SWITCH_FRAMES,
     DayNight,
     allows,
+    brightness,
     channel_spread,
 )
 
@@ -97,3 +99,37 @@ def test_allows() -> None:
     assert allows("always", None) and allows("always", True) and allows("always", False)
     assert allows("night", True) and not allows("night", False) and not allows("night", None)
     assert allows("day", False) and allows("day", None) and not allows("day", True)
+
+
+def dark_tinted() -> np.ndarray:
+    """What an IR-less camera sends at night: nearly black, with magenta sensor noise."""
+    rng = np.random.default_rng(5)
+    frame = np.zeros((H, W, 3), dtype=np.uint8)
+    frame[..., 0] = rng.integers(10, 30, size=(H, W))  # B
+    frame[..., 1] = rng.integers(2, 20, size=(H, W))  # G
+    frame[..., 2] = rng.integers(8, 28, size=(H, W))  # R
+    return frame
+
+
+def test_brightness_is_the_mean_level() -> None:
+    assert brightness(grey(120)) == pytest.approx(120.0)
+    assert brightness(dark()) == 0.0
+    assert brightness(np.zeros((H, W), dtype=np.uint8)) == 0.0
+
+
+def test_a_dark_tinted_frame_counts_as_night_even_with_chroma_noise() -> None:
+    frame = dark_tinted()
+    assert channel_spread(frame) > NIGHT_SPREAD  # spread alone would call this day
+    assert brightness(frame) < NIGHT_BRIGHTNESS
+    dn = DayNight()
+    assert dn.update(frame, 1.0) is True
+    assert dn.last_brightness == pytest.approx(brightness(frame))
+
+
+def test_a_dim_but_coloured_scene_above_the_brightness_floor_is_day() -> None:
+    frame = colour()  # mean (40 + 120 + 200) / 3 = 120
+    dn = DayNight()
+    assert dn.update(frame, 1.0) is False
+    dn2 = DayNight(brightness_threshold=150.0)
+    assert dn2.update(frame, 1.0) is True
+    assert NIGHT_BRIGHTNESS == 40.0

@@ -84,6 +84,8 @@ def _live_status(name: str) -> dict[str, Any] | None:
         "night": True,
         "night_since": 1759536000.0,
         "night_switches": 1,
+        "night_spread": 1.2,
+        "night_brightness": 23.4,
         "restart_pending": False,
         "detectors": [
             {
@@ -296,6 +298,7 @@ def test_panel_shows_night_mode(env: SimpleNamespace) -> None:
     r = env.client.get("/cameras/yard/detection")
     assert r.status_code == 200
     assert "night mode on" in r.text
+    assert "spread 1.2, brightness 23" in r.text
 
 
 def test_panel_lists_detectors_with_index_keyed_toggles(env: SimpleNamespace) -> None:

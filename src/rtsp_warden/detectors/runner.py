@@ -215,6 +215,12 @@ class DetectorRunner:
             "night": self.daynight.night,
             "night_since": self.daynight.since_ts,
             "night_switches": int(self.daynight.switches),
+            "night_spread": None
+            if self.daynight.night is None
+            else float(self.daynight.last_spread),
+            "night_brightness": (
+                None if self.daynight.night is None else float(self.daynight.last_brightness)
+            ),
         }
 
     def _slot_status(self, i: int, slot: DetectorSlot) -> dict[str, Any]:

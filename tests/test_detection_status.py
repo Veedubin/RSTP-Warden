@@ -119,6 +119,8 @@ def test_summarize_detection_drops_unknown_keys_and_non_finite_fps() -> None:
         "night",
         "night_since",
         "night_switches",
+        "night_spread",
+        "night_brightness",
     }
 
 
@@ -204,10 +206,19 @@ def test_summarize_detection_defaults_the_stationary_counters_to_zero() -> None:
 
 def test_summarize_detection_carries_the_night_fields() -> None:
     raw = _raw(_onnx_row())
-    raw.update({"night": True, "night_since": 12.5, "night_switches": 2})
+    raw.update(
+        {
+            "night": True,
+            "night_since": 12.5,
+            "night_switches": 2,
+            "night_spread": 1.5,
+            "night_brightness": 22.0,
+        }
+    )
     out = summarize_detection(raw)
     assert out is not None
     assert (out["night"], out["night_since"], out["night_switches"]) == (True, 12.5, 2)
+    assert (out["night_spread"], out["night_brightness"]) == (1.5, 22.0)
 
 
 def test_summarize_detection_night_defaults_when_absent_or_odd() -> None:
