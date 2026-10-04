@@ -40,7 +40,9 @@ One card per unit of work. Status phrases are updated in place; history stays in
   per-slot `classes` on detector specs with Detection-panel controls; training tool in `tools/wildlife/` (separate
   uv project, never in the wheel). No rule gating on night in this release; the owner wants every event of every
   label visible until the model is trusted. Release 1.4.0.
-- Status: **in progress** 2026-10-04. Task 1 (daylight module) started.
+- Status: **runtime done, model training** 2026-10-04 early morning. Tasks 1-11 committed locally (`d19038a` ..
+  `4e402be`, version 1.4.0, gate 2292 passed); `train.sh` running on the 4080 (~2.5 h). Left: evaluate, export,
+  verify, install into the live stack, HANDOFF with the eval table, then push.
 
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve

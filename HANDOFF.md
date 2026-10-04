@@ -2,6 +2,46 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
+## 2026-10-04 (early morning) — START HERE: RW-5 runtime shipped and gated; the wildlife model is training
+
+**Where things are.** `master` is local-only ahead of `origin/master` (`715e8ec`) by the RW-5 commits (`d6ed1c2`
+docs .. `4e402be` version 1.4.0); nothing pushed yet (push only on the owner's word). Single checkout, working tree
+clean apart from the gitignored `config/`, `data/`, `tools/wildlife/data/`, `tools/wildlife/.yolox/`,
+`tools/wildlife/YOLOX_outputs/`. Gate on `4e402be`: **2292 passed / 1 skipped**, ruff exactly the 4 baseline E501,
+format clean. The compose stack still runs the pre-RW-5 image against the Foscam.
+
+**What RW-5 shipped (runtime, all tested offline).** Spec `docs/superpowers/specs/2026-10-04-wildlife-detection-design.md`,
+plan `docs/superpowers/plans/2026-10-04-rw5-wildlife-detection.md` (its "Deviations" section is the truth where it
+differs from the task text).
+- `detectors/daylight.py`: `channel_spread` + `DayNight` (first frame sets the state, 3-frame hysteresis, threshold
+  4.0). The runner measures every decoded frame before the privacy masks, sets `event_builder.night`, writes
+  `"night"` into every event's metadata, reports `night` / `night_since` / `night_switches`; Detection panel says
+  "night mode on / off"; events show a `night` badge (old rows: none).
+- `DetectorSpec.when` (`always | day | night`, counted as `when_skipped`) and `DetectorSpec.classes` (onnx only,
+  validated against that model's labels, intersected with `detect_classes`; two slots sharing a label log a warning).
+  Detection panel: a `when` select on every row and a `classes` field on onnx rows
+  (`POST /cameras/{name}/detectors/{index}/when|classes`, patch-one-key write-back, 409 / 422 as the fps route).
+- `tools/wildlife/` (own uv project, never in the wheel): `setup.sh` (uv sync + pinned YOLOX checkout in `.yolox/`,
+  because YOLOX's `setup.py` imports torch at build time), `fetch.py`, `prepare.py`, `exp.py`, `train.sh`,
+  `evaluate.py`, `export.py`, `verify.py`; pure helpers pinned by `tests/test_wildlife_tool.py`.
+
+**Training, in flight.** Dataset built: 16473 train / 1830 val images (ENA24 7898+891, Open Images 8393+921, Dat Tran
+182+18); train boxes cat 2053, fox 1321, raccoon 865, person 5123, vehicle 4010; 499 of the 1830 val images are
+grayscale. The public ENA24 zip has **no human images**, hence Open Images `Person` and `Car` as hard negatives.
+`BATCH=32 ./train.sh` started 01:55 on the RTX 4080 SUPER (about 10 GB, 0.29 s/iter, 515 iters/epoch, 50 epochs,
+so roughly 2.5 h); log in the session scratchpad (`train.log`), checkpoints in `tools/wildlife/YOLOX_outputs/wildlife_yolox_s/`.
+If a fresh session finds `best_ckpt.pth` there: `cd tools/wildlife && uv run --no-sync python evaluate.py` (soft
+target: cat / fox / raccoon AP50 >= 0.6 on the `gray` column), `uv run --no-sync python export.py`, then from the
+repo root `uv run python tools/wildlife/verify.py tools/wildlife/out/wildlife-yolox-s <a val raccoon image>`,
+`cp -r tools/wildlife/out/wildlife-yolox-s data/models/`, add the second detector to `config/config.yaml` (block in
+README "Wildlife model"), rebuild + restart the compose stack (`docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`).
+
+**Next, in order.** 1. Finish training → evaluate → export → verify → install into the live stack (above).
+2. HANDOFF/TASKS with the eval table; then the owner's "push". 3. Owner: watch for `fox` / `raccoon` / `cat` events
+with the right label by day and by night; optionally drop the Roboflow "Cat/Raccoons" COCO export into
+`tools/wildlife/data/raw/roboflow-cat-raccoons/` and retrain for more raccoons. 4. Later: publish the model as a
+release asset + built-in descriptor; an event "this was actually a fox" relabel button (RW-6 candidate).
+
 ## 2026-10-03 (late afternoon) — START HERE: RW-4 verified by the owner on the live camera; nothing in flight
 
 **Where things are.** `master` = `origin/master` at `17e196b` plus this docs commit; single checkout
