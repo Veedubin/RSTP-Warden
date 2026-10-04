@@ -585,3 +585,55 @@ def test_event_card_css_is_shipped_and_old_row_partial_is_gone() -> None:
     assert ".event-grid {" in css
     assert ".event-thumb-placeholder[hidden]" in css
     assert not (TEMPLATES_DIR / "partials" / "event_row.html").exists()
+
+
+# --------------------------------------------------------------------------- RW-5: night badge
+
+
+def _seed_with_metadata(label: str, metadata: dict | None) -> int:
+    return insert_event(
+        camera_name="front",
+        event_type="object",
+        label=label,
+        confidence=0.8,
+        zone="",
+        track_id=3,
+        message=f"{label} on front",
+        created_at=T0,
+        metadata=metadata,
+    )
+
+
+def test_old_rows_without_night_render_without_badge(client: TestClient, rec_dir: Path) -> None:
+    """(review focus) Rows from before 1.4.0 have no night key: no badge, no error."""
+    _seed(rec_dir, label="person")
+    _seed_with_metadata("cat", {"bbox": [1, 2, 3, 4]})
+    _seed_with_metadata("dog", None)
+    r = client.get("/events")
+    assert r.status_code == 200
+    assert ">night<" not in r.text
+
+
+def test_night_events_show_a_badge_on_the_grid_and_the_detail(
+    client: TestClient, rec_dir: Path
+) -> None:
+    night_id = _seed_with_metadata("fox", {"night": True})
+    _seed_with_metadata("cat", {"night": False})
+    r = client.get("/events")
+    assert r.status_code == 200
+    assert r.text.count('<span class="event-badge">night</span>') == 1
+    r = client.get(f"/events/{night_id}")
+    assert r.status_code == 200
+    assert '<span class="event-badge">night</span>' in r.text
+    assert '<th scope="row">Night</th><td>yes</td>' in r.text
+
+
+def test_event_dict_reads_the_night_flag(clean_db: None, cfg: AppConfig) -> None:
+    night_id = _seed_with_metadata("raccoon", {"night": True})
+    day_id = _seed_with_metadata("cat", {"night": False})
+    odd_id = _seed_with_metadata("dog", {"night": "yes"})
+    assert svc.get_event_by_id(night_id, cfg)["night"] is True
+    assert svc.get_event_by_id(day_id, cfg)["night"] is False
+    assert svc.get_event_by_id(odd_id, cfg)["night"] is None
+    rows, _total = svc.list_events(cfg=cfg)
+    assert {r["id"]: r["night"] for r in rows} == {night_id: True, day_id: False, odd_id: None}

@@ -19,6 +19,7 @@ request input.
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -154,6 +155,18 @@ def _media_state(cfg: AppConfig | None, camera_name: str | None, stored: str | N
     return "ok" if resolve_media_path(cfg, camera_name, stored) is not None else "expired"
 
 
+def _night_flag(metadata_json: str | None) -> bool | None:
+    """The ``night`` flag of an event's metadata (RW-5), or None when absent or unreadable."""
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (TypeError, ValueError):
+        return None
+    value = data.get("night") if isinstance(data, dict) else None
+    return value if isinstance(value, bool) else None
+
+
 def event_to_dict(row: Event, cfg: AppConfig | None = None) -> dict[str, Any]:
     """Build the view model one event card / detail page renders.
 
@@ -185,6 +198,7 @@ def event_to_dict(row: Event, cfg: AppConfig | None = None) -> dict[str, Any]:
         "track_id": row.track_id,
         "message": row.message or "",
         "metadata_json": row.metadata_json or "{}",
+        "night": _night_flag(row.metadata_json),
         "created_at": created_at,
         "ended_at": ended_at,
         "started_iso": created_at.isoformat() if created_at is not None else "",

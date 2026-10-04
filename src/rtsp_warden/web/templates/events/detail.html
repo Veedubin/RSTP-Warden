@@ -3,7 +3,7 @@
 
 {% block content %}
 <hgroup>
-  <h1>{{ event.label }}{% if event.confidence_pct is not none %} {{ event.confidence_pct }}%{% endif %}{% if event.is_test %} <span class="event-badge">test</span>{% endif %}</h1>
+  <h1>{{ event.label }}{% if event.confidence_pct is not none %} {{ event.confidence_pct }}%{% endif %}{% if event.is_test %} <span class="event-badge">test</span>{% endif %}{% if event.night %} <span class="event-badge">night</span>{% endif %}</h1>
   <p>{{ event.camera_name }}{% if event.zone %} &middot; {{ event.zone }}{% endif %} &middot; {{ event.started_display }}</p>
 </hgroup>
 
@@ -43,6 +43,7 @@
         <tr><th scope="row">Label</th><td>{{ event.label }}</td></tr>
         <tr><th scope="row">Confidence</th><td>{% if event.confidence_pct is not none %}{{ event.confidence_pct }}%{% else %}-{% endif %}</td></tr>
         <tr><th scope="row">Zone</th><td>{{ event.zone or '-' }}</td></tr>
+        <tr><th scope="row">Night</th><td>{% if event.night is true %}yes{% elif event.night is false %}no{% else %}-{% endif %}</td></tr>
         <tr><th scope="row">Started</th><td>{{ event.started_display or '-' }}</td></tr>
         <tr><th scope="row">Ended</th><td>{{ event.ended_display or '-' }}</td></tr>
         <tr><th scope="row">Duration</th><td>{{ event.duration_display or '-' }}</td></tr>

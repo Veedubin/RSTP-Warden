@@ -17,6 +17,7 @@
       <a class="event-label" href="{{ evt.detail_url }}">{{ evt.label }}</a>
       {% if evt.confidence_pct is not none %}<span class="event-confidence">{{ evt.confidence_pct }}%</span>{% endif %}
       {% if evt.is_test %}<span class="event-badge">test</span>{% endif %}
+      {% if evt.night %}<span class="event-badge">night</span>{% endif %}
     </p>
     <small class="event-meta">{{ evt.camera_name }}{% if evt.zone %} &middot; {{ evt.zone }}{% endif %}</small>
     <small class="event-meta"><time datetime="{{ evt.started_iso }}">{{ evt.started_display }}</time></small>
