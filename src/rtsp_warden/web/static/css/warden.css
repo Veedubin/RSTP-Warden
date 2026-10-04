@@ -537,3 +537,31 @@ main code,
 .event-delete-all {
   margin-top: 0.75rem;
 }
+
+/* Detector table controls (RW-5): the when select and the classes field need room in a table
+   cell, but the nine columns must still fit a 1280 px page without a horizontal scroll. */
+.detector-table th,
+.detector-table td {
+  padding: 0.45rem 0.5rem;
+}
+.detector-table .detector-when-form select {
+  min-width: 6.25rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0;
+}
+.detector-table .detector-classes-form input[type="text"] {
+  min-width: 8rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.25rem;
+}
+.detector-table .detector-fps-form input[type="number"] {
+  width: 4rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+.detector-table .detector-fps-form button,
+.detector-table .detector-classes-form button {
+  padding: 0.3rem 0.6rem;
+}

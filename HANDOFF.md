@@ -2,6 +2,32 @@
 
 Session state for whoever picks this project up next. Newest block first. Task ids are in `TASKS.md`.
 
+## 2026-10-04 (afternoon) — START HERE: RW-5 pushed; admin event deletion and README screenshots added
+
+**Where things are.** `master` = `origin/master` at `9644ea6` plus the commits of this block (pushed on the owner's
+"commit and push"). Gate on `9644ea6`: **2304 passed / 1 skipped**, ruff the 4 baseline E501, format clean. The
+compose stack (GPU overlay, http://127.0.0.1:3333/) runs this code: `yolox-s` + `wildlife-yolox-s` on CUDA, night
+flag with the brightness floor. The owner's verdict on RW-5: "seems great".
+
+**What was added after RW-5.**
+- **Event deletion, admin only** (owner's ask: clear the test events and their images). `POST /events/{id}/delete`
+  removes the row, its `action_runs`, thumbnail and clip (`schema.delete_event`, `services.events.remove_event_files`
+  through `resolve_media_path`, so nothing outside an `output_dir` is touched); the card's Delete button swaps the
+  card away (htmx), a plain form returns to the list with a flash. `POST /events/delete` takes the list's filters
+  (`camera`, `label`, `from`, `to`) and deletes what they match, all events with none, behind a browser confirm
+  ("Delete N events" under the filters). Viewers see no controls and get 403. Tests in `tests/test_events_ui.py`.
+- **Screenshots**: `tools/screenshots.py` (Playwright on the system Chromium, credentials from env, LAN IPs in
+  page text replaced by `camera.lan`) and `docs/screenshots/*.png` referenced from a README "Screenshots" section.
+  Captured so far: camera, camera-settings, detection-classes, health, actions. **Not captured**: dashboard and
+  events, because both show the owner's 67 existing test events (bottle / microwave / oven / person thumbnails of
+  their room) and the owner does not want those public. A temporary admin user `screenshots` was created in the
+  live DB for the captures and removed again afterwards.
+
+**Waiting on the owner.** Whether to clear the 67 existing events (one click on "Delete 67 events" on /events, or
+say so and the agent does it), after which the dashboard and events screenshots can be taken and added. Then the
+usual: watch the first real cat / fox / raccoon events; optional Roboflow set + retrain; release asset + built-in
+descriptor; relabel button (RW-6 candidate).
+
 ## 2026-10-04 (morning) — START HERE: RW-5 done; wildlife-yolox-s trained, exported and running in the live stack
 
 **Where things are.** `master` is local-only ahead of `origin/master` (`715e8ec`) by the RW-5 commits (`d6ed1c2` ..

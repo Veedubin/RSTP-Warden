@@ -46,6 +46,13 @@ One card per unit of work. Status phrases are updated in place; history stays in
   installed in `data/models/wildlife-yolox-s/` with the second detector in the live config. Owner: watch the first
   real animal events; optional Roboflow set + retrain; later a release asset + built-in descriptor.
 
+## RW-5b — Event deletion (admin) and README screenshots (added 2026-10-04 afternoon)
+- Owner's ask after RW-5: screenshots of the UI, and a way to delete events (their test thumbnails must not appear),
+  admin only.
+- Status: **done** 2026-10-04 (`9644ea6` + follow-up commits, pushed). Per-event delete (card + detail) and
+  "Delete N events" matching the list filters; `tools/screenshots.py`; five pages in `docs/screenshots/`. Dashboard
+  and events screenshots wait for the owner to clear the existing events.
+
 ## Owner actions (not for agents)
 - Rotate the Foscam camera password: it was public in `origin` until the 2026-10-03 history rewrite, and GitHub may still serve
   the old commits by SHA (ask GitHub Support to purge them if wanted). Then update `.env`.

@@ -18,6 +18,17 @@ A self-hosted Network Video Recorder (NVR) for RTSP cameras. Records continuousl
 - **Tuning** per camera: detection rate (`detect_fps`, per-detector `fps`), sensitivity (0-100), detection classes, enable/disable per detector
 - **Multi-user** with bcrypt sessions, bearer API tokens, and admin/viewer roles
 
+## Screenshots
+
+Taken with `tools/screenshots.py` against a single Foscam C1 on a GPU host (the camera was pointed at the floor).
+
+| | |
+|---|---|
+| **Camera page**: live preview, status, detection settings, both detectors (`yolox-s` for people and vehicles, `wildlife-yolox-s` for animals) with their `when` and `classes`, zones, rules, retention | **Camera settings** over the camera's own HTTP API: stream profiles, image tuning, infrared, on-screen text |
+| [![Camera page](docs/screenshots/camera.png)](docs/screenshots/camera.png) | [![Camera settings](docs/screenshots/camera-settings.png)](docs/screenshots/camera-settings.png) |
+| **Detection classes**: the labels of every model on the camera, grouped | **Health**, **Actions** |
+| [![Detection classes](docs/screenshots/detection-classes.png)](docs/screenshots/detection-classes.png) | [![Health](docs/screenshots/health.png)](docs/screenshots/health.png) [![Actions](docs/screenshots/actions.png)](docs/screenshots/actions.png) |
+
 ## Why this and not ZoneMinder / Shinobi / Frigate?
 
 | | rtsp-warden | Frigate | ZoneMinder | Shinobi |
