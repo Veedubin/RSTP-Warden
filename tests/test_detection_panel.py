@@ -81,6 +81,9 @@ def _live_status(name: str) -> dict[str, Any] | None:
         "frames_dropped": 7,
         "stationary_held": 1,
         "stationary_suppressed": 4,
+        "night": True,
+        "night_since": 1759536000.0,
+        "night_switches": 1,
         "restart_pending": False,
         "detectors": [
             {
@@ -211,6 +214,12 @@ def test_panel_shows_detect_fps_rules_and_restart_note(env: SimpleNamespace) -> 
     assert "7 dropped" in r.text
     assert "/cameras/yard/detection-classes" in r.text
     assert "/cameras/yard/zones" in r.text
+
+
+def test_panel_shows_night_mode(env: SimpleNamespace) -> None:
+    r = env.client.get("/cameras/yard/detection")
+    assert r.status_code == 200
+    assert "night mode on" in r.text
 
 
 def test_panel_lists_detectors_with_index_keyed_toggles(env: SimpleNamespace) -> None:

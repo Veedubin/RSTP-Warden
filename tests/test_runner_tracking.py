@@ -694,3 +694,105 @@ def test_person_who_walks_in_and_then_stands_still_is_one_event(tmp_path: Path) 
     assert runner.status()["stationary_held"] == 0
     runner.teardown()
     assert len(db.of("close")) == 1
+
+
+# --- RW-5: day / night flag ------------------------------------------------------------------
+
+
+def _colour_jpeg() -> bytes:
+    frame = np.zeros((H, W, 3), dtype=np.uint8)
+    frame[..., 2] = 200
+    ok, buf = cv2.imencode(".jpg", frame)
+    assert ok
+    return buf.tobytes()
+
+
+def _job_bytes(ts: float, jpeg: bytes) -> _FrameJob:
+    return _FrameJob(camera="yard", stream="main", jpeg_bytes=jpeg, ts_unix=ts)
+
+
+def _onnx_slot(index: int, det: ScriptedDetector) -> DetectorSlot:
+    return DetectorSlot(
+        index=index,
+        spec=DetectorSpec(type="onnx"),
+        detector=det,
+        fps=5.0,
+        tracked=True,
+        motion_events=False,
+        input_width=640,
+    )
+
+
+def test_runner_tracks_night_state_and_reports_it() -> None:
+    det = ScriptedDetector(lambda ts: [])
+    runner = DetectorRunner(
+        name="d",
+        slots=(_onnx_slot(0, det),),
+        worker_count=1,
+        tap_fps=5.0,
+        tracker=Tracker(grace_seconds=1.0, min_frames=1),
+    )
+    st = runner.status()
+    assert st["night"] is None and st["night_since"] is None and st["night_switches"] == 0
+    runner._process_job(_job(1.0))  # the black test JPEG is grayscale
+    st = runner.status()
+    assert st["night"] is True and st["night_since"] == 1.0 and st["night_switches"] == 0
+    colour = _colour_jpeg()
+    for ts in (2.0, 3.0):
+        runner._process_job(_job_bytes(ts, colour))
+    assert runner.status()["night"] is True
+    runner._process_job(_job_bytes(4.0, colour))
+    st = runner.status()
+    assert st["night"] is False and st["night_since"] == 4.0 and st["night_switches"] == 1
+    json.dumps(st)  # plain JSON types only
+
+
+def test_runner_hands_the_night_flag_to_the_event_builder() -> None:
+    class Builder:
+        night: bool | None = None
+
+        def __init__(self) -> None:
+            self.seen: list[bool | None] = []
+
+        def on_tracks(self, update: TrackerUpdate, shape: tuple[int, int]) -> None:
+            self.seen.append(self.night)
+
+        def on_motion(self, *args: Any) -> None:
+            pass
+
+        def close_all(self, ts: float) -> None:
+            pass
+
+    builder = Builder()
+    det = ScriptedDetector(
+        lambda ts: [Detection(kind="person", confidence=0.9, bbox=PERSON_BOX, ts_unix=ts)]
+    )
+    runner = DetectorRunner(
+        name="d",
+        slots=(_onnx_slot(0, det),),
+        worker_count=1,
+        tap_fps=5.0,
+        tracker=Tracker(grace_seconds=1.0, min_frames=1),
+        event_builder=builder,  # type: ignore[arg-type]
+    )
+    runner._process_job(_job(1.0))
+    runner._process_job(_job_bytes(2.0, _colour_jpeg()))
+    assert builder.seen == [True, True]  # one colour frame does not flip the state yet
+
+
+def test_masks_do_not_bias_the_night_measure() -> None:
+    """A privacy mask blacks out pixels; the measure runs before masks are applied."""
+    from rtsp_warden.detectors.roi import Mask
+
+    det = ScriptedDetector(lambda ts: [])
+    full = Mask(polygon=[(0, 0), (W, 0), (W, H), (0, H)], name="all")
+    runner = DetectorRunner(
+        name="d",
+        slots=(_onnx_slot(0, det),),
+        worker_count=1,
+        tap_fps=5.0,
+        masks=[full],
+        tracker=Tracker(grace_seconds=1.0, min_frames=1),
+    )
+    runner._process_job(_job_bytes(1.0, _colour_jpeg()))
+    assert runner.status()["night"] is False

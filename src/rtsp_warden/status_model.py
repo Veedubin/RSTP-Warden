@@ -104,6 +104,9 @@ class DetectionStatus(TypedDict):
     detectors: list[DetectorStatus]
     stationary_held: int  # tracks held back right now because they have not moved yet
     stationary_suppressed: int  # tracks that ended without ever moving (no event made)
+    night: bool | None  # IR / grayscale frames right now; None before the first frame
+    night_since: float | None  # unix time of the last day/night change
+    night_switches: int  # day/night changes since the runner started
 
 
 class CameraStatus(TypedDict, total=False):
@@ -395,6 +398,9 @@ def summarize_detection(raw: Any) -> DetectionStatus | None:
         "errors": _as_int(raw.get("errors_total")),
         "stationary_held": _as_int(raw.get("stationary_held")),
         "stationary_suppressed": _as_int(raw.get("stationary_suppressed")),
+        "night": raw.get("night") if isinstance(raw.get("night"), bool) else None,
+        "night_since": _as_float(raw.get("night_since")),
+        "night_switches": _as_int(raw.get("night_switches")),
         "warnings": warnings,
         "detectors": detectors,
     }

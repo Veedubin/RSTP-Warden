@@ -125,7 +125,11 @@ def test_open_inserts_row_writes_thumbnail_and_calls_on_open(tmp_path: Path) -> 
     assert fields["zone"] == ""
     assert fields["track_id"] == 1
     assert fields["created_at"] == _utc(10.0)
-    assert fields["metadata"] == {"bbox": [100, 50, 40, 60], "frame_size": [320, 180]}
+    assert fields["metadata"] == {
+        "bbox": [100, 50, 40, 60],
+        "frame_size": [320, 180],
+        "night": None,
+    }
     rel = f"yard/thumbnails/{event_id}.jpg"
     assert db.of("update") == [("update", event_id, {"thumbnail_path": rel})]
     assert (tmp_path / rel).is_file()
@@ -630,6 +634,7 @@ def test_thumbnail_uses_the_full_frame_near_the_best_time_with_the_box_scaled(
     assert db.of("insert")[0][2]["metadata"] == {
         "bbox": [100, 50, 40, 60],
         "frame_size": [320, 180],
+        "night": None,
     }
 
 
@@ -682,3 +687,33 @@ def test_frame_source_errors_fall_back_to_the_tap_frame(tmp_path: Path) -> None:
     builder.on_tracks(_update(opened=(_track(),)), SHAPE)
 
     assert _thumb(tmp_path, db.of("insert")[0][1]).shape[:2] == (180, 320)
+
+
+# --- RW-5: night flag in event metadata --------------------------------------------------------
+
+
+def test_object_event_metadata_carries_the_night_flag(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db)
+    assert builder.night is None
+    builder.night = True
+    builder.on_tracks(_update(opened=(_track(1),)), SHAPE)
+    ((_kind, _id, fields),) = db.of("insert")
+    assert fields["metadata"]["night"] is True
+
+
+def test_motion_event_metadata_carries_the_night_flag(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db)
+    builder.night = False
+    builder.on_motion(True, False, 10.0)
+    ((_kind, _id, fields),) = db.of("insert")
+    assert fields["metadata"] == {"night": False}
+
+
+def test_metadata_night_is_null_before_the_first_frame(tmp_path: Path) -> None:
+    db = FakeDb()
+    builder = _builder(tmp_path, db)
+    builder.on_tracks(_update(opened=(_track(1),)), SHAPE)
+    ((_kind, _id, fields),) = db.of("insert")
+    assert fields["metadata"]["night"] is None

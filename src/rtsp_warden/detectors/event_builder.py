@@ -155,6 +155,8 @@ class EventBuilder:
         self._db = db
         self.stationary_iou = float(stationary_iou)
         self.frame_source = frame_source
+        # Set by the runner once per decoded frame (RW-5); written into event metadata.
+        self.night: bool | None = None
         self._lock = threading.Lock()
         self._closed = False
         self._open: dict[int, _OpenEvent] = {}
@@ -321,6 +323,7 @@ class EventBuilder:
                     metadata={
                         "bbox": list(_bbox(track.best_bbox)),
                         "frame_size": [self._frame_w, self._frame_h],
+                        "night": self.night,
                     },
                 )
             )
@@ -478,7 +481,7 @@ class EventBuilder:
                     track_id=None,
                     message=f"motion detected on {self.camera}",
                     created_at=started,
-                    metadata={},
+                    metadata={"night": self.night},
                 )
             )
         except Exception:

@@ -55,6 +55,9 @@
   <p class="detection-status"><small>
     {{ status.get('frames_processed', 0) }} frames analysed,
     {{ status.get('frames_dropped', 0) }} dropped because detection fell behind
+    {% if status.get('night') is not none %}
+    &middot; night mode {{ 'on' if status.get('night') else 'off' }}
+    {% endif %}
     {% if status.get('stationary_suppressed') or status.get('stationary_held') %}
     &middot; {{ status.get('stationary_suppressed', 0) }} objects that never moved were held back
     ({{ status.get('stationary_held', 0) }} held back right now)

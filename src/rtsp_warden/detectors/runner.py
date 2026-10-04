@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 
 from .base import Detection, Detector
+from .daylight import DayNight
 from .event_builder import LiveBox, LiveBoxes
 from .grid_mask import GridMask
 from .roi import ROI, Mask, apply_masks, filter_by_roi
@@ -85,6 +86,8 @@ class DetectorRunner:
     event_builder: EventBuilder | None = None
     motion_burst: MotionBurst | None = None
     tap_fps: float = 5.0
+    # Day / night (IR) state of this camera, updated from every decoded frame (RW-5).
+    daynight: DayNight = field(default_factory=DayNight)
 
     def __post_init__(self) -> None:
         if self.slots and not self.detectors:
@@ -207,6 +210,10 @@ class DetectorRunner:
             # Stationary suppression (RW-4): tracks held because they never moved.
             "stationary_held": int(getattr(self.event_builder, "held_count", 0) or 0),
             "stationary_suppressed": int(getattr(self.event_builder, "suppressed_total", 0) or 0),
+            # Day / night flag (RW-5): None until the first frame was decoded.
+            "night": self.daynight.night,
+            "night_since": self.daynight.since_ts,
+            "night_switches": int(self.daynight.switches),
         }
 
     def _slot_status(self, i: int, slot: DetectorSlot) -> dict[str, Any]:
@@ -275,6 +282,10 @@ class DetectorRunner:
             logger.debug("failed to decode JPEG for %s/%s", job.camera, job.stream)
             return
 
+        # Before the masks: masked pixels are black and would pull the measure to "night".
+        night = self.daynight.update(frame, job.ts_unix)
+        if self.event_builder is not None:
+            self.event_builder.night = night
         frame = apply_masks(frame, self.masks)
         frame_h, frame_w = int(frame.shape[0]), int(frame.shape[1])
         self._last_ts = job.ts_unix

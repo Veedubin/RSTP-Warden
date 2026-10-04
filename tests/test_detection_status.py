@@ -116,6 +116,9 @@ def test_summarize_detection_drops_unknown_keys_and_non_finite_fps() -> None:
         "detectors",
         "stationary_held",
         "stationary_suppressed",
+        "night",
+        "night_since",
+        "night_switches",
     }
 
 
@@ -197,3 +200,22 @@ def test_summarize_detection_defaults_the_stationary_counters_to_zero() -> None:
     out = summarize_detection(_raw(_onnx_row()))
     assert out is not None
     assert (out["stationary_held"], out["stationary_suppressed"]) == (0, 0)
+
+
+def test_summarize_detection_carries_the_night_fields() -> None:
+    raw = _raw(_onnx_row())
+    raw.update({"night": True, "night_since": 12.5, "night_switches": 2})
+    out = summarize_detection(raw)
+    assert out is not None
+    assert (out["night"], out["night_since"], out["night_switches"]) == (True, 12.5, 2)
+
+
+def test_summarize_detection_night_defaults_when_absent_or_odd() -> None:
+    out = summarize_detection(_raw(_onnx_row()))
+    assert out is not None
+    assert (out["night"], out["night_since"], out["night_switches"]) == (None, None, 0)
+    raw = _raw(_onnx_row())
+    raw.update({"night": "yes", "night_since": float("nan"), "night_switches": "many"})
+    out = summarize_detection(raw)
+    assert out is not None
+    assert (out["night"], out["night_since"], out["night_switches"]) == (None, None, 0)
